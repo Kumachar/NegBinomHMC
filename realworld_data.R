@@ -1,18 +1,19 @@
-# main.R
-
+library(haven)
 library(NegBinomHMC)
-?hmc_sampler
+dat <- read_dta("https://stats.idre.ucla.edu/stat/stata/dae/nb_data.dta")
+dat <- within(dat, {
+  prog <- factor(prog, levels = 1:3, labels = c("General", "Academic", "Vocational"))
+  id <- factor(id)
+})
 
+head(dat)
 
-# Test the adaptive sampler
-n <- 200
-p <- 3
-beta_true <- c(1, 0, -1)
+X <- model.matrix(~ math + prog, data = dat)
+y <- dat$daysabs
 r <- 2
-data <- simulate_negbin_data(n, p, beta_true, r, seed = 123)
-X <- data$X
-y <- data$y
-
+p <- ncol(X)
+# Define the log-posterior function for the negative binomial model
+# Fit a negative binomial regression model
 result <- hmc_sampler(
   log_post = log_posterior_negbin,
   grad_log_post = grad_log_posterior_negbin,
@@ -29,8 +30,6 @@ result <- hmc_sampler(
   target_accept = 0.6
 )
 
-# Results
-cat("True beta:", beta_true, "\n")
 cat("Estimated beta (mean):", colMeans(result$samples), "\n")
 cat("Acceptance rate:", result$acceptance_rate, "\n")
 cat("Final epsilon:", result$final_epsilon, "\n")
