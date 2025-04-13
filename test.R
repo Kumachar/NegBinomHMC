@@ -35,3 +35,17 @@ cat("Estimated beta (mean):", colMeans(result$samples), "\n")
 cat("Acceptance rate:", result$acceptance_rate, "\n")
 cat("Final epsilon:", result$final_epsilon, "\n")
 
+
+# Posterior summaries
+posterior_samples <- result$samples
+colnames(posterior_samples) <- paste0("beta_", 1:p)
+summary(posterior_samples)
+
+# Trace plot
+par(mfrow = c(p, 1))
+for (j in 1:p) {
+  plot(posterior_samples[, j], type = "l", 
+       main = paste("Trace plot for beta", j), ylab = "Value", xlab = "Iteration")
+  abline(h = beta_true[j], col = "red", lwd = 2)
+}
+
