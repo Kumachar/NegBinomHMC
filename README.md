@@ -15,13 +15,17 @@ with a warmup phase to tune the step size automatically.
 ## Overview
 
 Negative Binomial regression is commonly used for modeling
-over-dispersed count data. With NegBinomHMC, you can: - **Simulate
-Data:** Generate synthetic datasets following a Negative Binomial
-distribution using a specified regression model. - **Model Evaluation:**
-Calculate the log-posterior and its gradient for your Negative Binomial
-regression model. - **Adaptive HMC Sampling:** Sample from the Bayesian
-posterior using an adaptive HMC sampler that tunes its step size during
-a warmup period to achieve a desired acceptance rate.
+over-dispersed count data. With NegBinomHMC, you can:
+
+- **Simulate Data:** Generate synthetic datasets following a Negative
+  Binomial distribution using a specified regression model.
+
+- **Model Evaluation:** Calculate the log-posterior and its gradient for
+  your Negative Binomial regression model.
+
+- **Adaptive HMC Sampling:** Sample from the Bayesian posterior using an
+  adaptive HMC sampler that tunes its step size during a warmup period
+  to achieve a desired acceptance rate.
 
 This package is intended for educational purposes and as a starting
 point for more advanced Bayesian inference in count data models.
@@ -52,55 +56,43 @@ You can install the development version of NegBinomHMC from
 devtools::install_github("Kumachar/NegBinomHMC")
 ```
 
-## Dual Averaging for Adaptive $\epsilon$
+## New Feature: Dual Averaging for Adaptive Epsilon
 
-Dual averaging adapts the HMC step size $\epsilon$ so that the
-acceptance probability approaches a target rate $\delta$
-(e.g. $0.65$).  
-At each warm‑up iteration it
+### Concept
 
-1.  runs one HMC step and records the acceptance probability $\alpha_t$;
-2.  updates a running statistic that nudges $\log\epsilon$;
-3.  smooths the update to stabilise convergence.
+Dual averaging is a robust method to adapt `epsilon` by targeting a
+desired acceptance rate (denoted $\delta$, e.g., 0.65). It updates
+`epsilon` iteratively to minimize the difference between the actual and
+target acceptance probabilities. The algorithm:
 
-### Update rules (Hoffman & Gelman 2014, as used in NUTS)
+1.  Runs HMC iterations, computing the acceptance probability $\alpha_t$
+    at iteration $t$.
+2.  Updates a running statistic to adjust $\log \epsilon$.
+3.  Smooths the updates to stabilize convergence.
 
-$$
-H_t = 
-\Bigl(1-\frac{1}{t+t_0}\Bigr)H_{t-1}
-+
-\frac{1}{t+t_0}\,(\delta-\alpha_t),
-$$
+The update rules (from Hoffman & Gelman, 2014, used in NUTS) are:
 
 $$
-\log\tilde{\epsilon}_t
-=
-\mu - \frac{\sqrt{t}}{\gamma}\,H_t,
+H_t = \left(1 - \frac{1}{t + t_0}\right) H_{t-1} + \frac{1}{t + t_0} (\delta - \alpha_t),
+$$ $$
+\log \tilde{\epsilon}_t = \mu - \frac{\sqrt{t}}{\gamma} H_t,
+$$ $$
+\log \epsilon_t = \kappa \log \tilde{\epsilon}_t + (1 - \kappa) \log \epsilon_{t-1},
 $$
 
-$$
-\log\epsilon_t
-=
-\kappa\,\log\tilde{\epsilon}_t
-+
-(1-\kappa)\,\log\epsilon_{t-1}.
-$$
+where:
 
-### Symbol glossary
+- $\alpha_t$: Acceptance probability at iteration $t$.
+- $\delta$: Target acceptance rate (e.g., 0.65).
+- $H_t$: Running statistic tracking the error in acceptance rate.
+- $\mu$: Initial guess for $\log \epsilon$.
+- $t_0$: Controls early iteration weighting (e.g., 10).
+- $\gamma$: Controls adaptation speed (e.g., 0.05).
+- $\kappa$: Smoothing parameter (e.g., 0.75).
+- $\epsilon_t$: Step size at iteration $t$.
 
-| Symbol | Meaning | Typical value |
-|----|----|----|
-| $\alpha_t$ | Acceptance probability at iteration $t$ | – |
-| $\delta$ | Target acceptance rate | $0.65$ |
-| $H_t$ | Running statistic for acceptance error | – |
-| $\mu$ | Initial guess for $\log\epsilon$ | $\log(10\,\epsilon_0)$ |
-| $t_0$ | Extra weight on early iterations | $10$ |
-| $\gamma$ | Controls adaptation speed | $0.05$ |
-| $\kappa$ | Smoothing parameter | $0.75$ |
-| $\epsilon_t$ | Step size at iteration $t$ | – |
-
-After the warm‑up phase, fix $\epsilon$ to the final adapted value (or
-its average) for the sampling phase to preserve Markov‑chain validity.
+After a warm-up phase, we fix `epsilon` to the final adapted value for
+the sampling phase to ensure Markov chain validity.
 
 ## Simulation Example
 
