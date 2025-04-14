@@ -39,7 +39,7 @@ NegBinomHMC/
 │   ├── hmc_sampler.R                # Adaptive HMC sampler and helper functions
 ├── man/              # Documentation files (generated via roxygen2)
 ├── README.md         # This file
-└── LICENSE           # License file (e.g., MIT)
+└── LICENSE           # License file
 ```
 
 ## Installation
