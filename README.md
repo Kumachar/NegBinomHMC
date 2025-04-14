@@ -81,7 +81,7 @@ $$
 $$
 
 $$
-\log \epsilon_t = \kappa \log \tilde{\epsilon}_t + (1 - \kappa) \log \epsilon_{t-1},
+\log \epsilon_t = \kappa \log \tilde{\epsilon}_t + (1 - \kappa) \log \epsilon_{t-1}
 $$
 
 where:
@@ -138,11 +138,11 @@ result <- hmc_sampler(
 cat("True beta:", beta_true, "\n")
 #> True beta: 1 0 -1
 cat("Estimated beta (mean):", colMeans(result$samples), "\n")
-#> Estimated beta (mean): 0.9857302 -0.101327 -0.9700795
+#> Estimated beta (mean): 0.9841496 -0.102741 -0.9723564
 cat("Acceptance rate:", result$acceptance_rate, "\n")
-#> Acceptance rate: 0.7466667
+#> Acceptance rate: 0.734
 cat("Final epsilon:", result$final_epsilon, "\n")
-#> Final epsilon: 0.08763474
+#> Final epsilon: 0.08109449
 ```
 
 ## Real-World Example 1
@@ -170,7 +170,6 @@ modeling.
 
 ``` r
 library(haven)
-#> Warning: 程辑包'haven'是用R版本4.4.2 来建造的
 library(NegBinomHMC)
 dat <- read_dta("https://stats.idre.ucla.edu/stat/stata/dae/nb_data.dta")
 dat <- within(dat, {
@@ -212,11 +211,11 @@ result <- hmc_sampler(
 )
 
 cat("Estimated beta (mean):", colMeans(result$samples), "\n")
-#> Estimated beta (mean): 2.325117 -0.005510568 -0.1211997 -0.9805684
+#> Estimated beta (mean): 2.354502 -0.005713888 -0.1490803 -0.9932917
 cat("Acceptance rate:", result$acceptance_rate, "\n")
-#> Acceptance rate: 0.8066667
+#> Acceptance rate: 0.7833333
 cat("Final epsilon:", result$final_epsilon, "\n")
-#> Final epsilon: 0.00128329
+#> Final epsilon: 0.001292785
 ```
 
 ## Real-World Example 2
@@ -256,10 +255,6 @@ summary(nb_model)
 #> glm.nb(formula = injuries_total ~ lighting_condition + num_units + 
 #>     crash_day_of_week + crash_month, data = accidents, init.theta = 0.7415346039, 
 #>     link = log)
-#> 
-#> Deviance Residuals: 
-#>     Min       1Q   Median       3Q      Max  
-#> -2.3278  -0.7741  -0.7420   0.3144   7.1521  
 #> 
 #> Coefficients:
 #>                                           Estimate Std. Error z value Pr(>|z|)
@@ -366,18 +361,18 @@ accept_rate <- hmc_result$acceptance_rate
 final_epsilon <- hmc_result$final_epsilon
 
 cat("HMC acceptance rate:", accept_rate, "\n")
-#> HMC acceptance rate: 0.8513333
+#> HMC acceptance rate: 0.8133333
 cat("final epsilon:", final_epsilon, "\n")
-#> final epsilon: 0.002491124
+#> final epsilon: 0.002526504
 
 posterior_means <- colMeans(samples)
 cat("HMC posterior mean：\n")
 #> HMC posterior mean：
 print(posterior_means)
-#>  [1] -2.03838969  0.10181744 -0.05098888 -0.15535096 -0.10877565 -0.93441896
-#>  [7]  0.55132177 -0.12305121 -0.16126725 -0.13284408 -0.16143997 -0.19428086
-#> [13] -0.11490596 -0.06921890  0.07170632  0.13609771  0.18477092  0.19726160
-#> [19]  0.23929132  0.19969139  0.19356864  0.15325292  0.07949357  0.01619087
+#>  [1] -2.03841619  0.10029438 -0.05236648 -0.15684310 -0.11067667 -0.93572419
+#>  [7]  0.55156213 -0.12301710 -0.16111867 -0.13256164 -0.16110311 -0.19399285
+#> [13] -0.11471802 -0.06841506  0.07254415  0.13646549  0.18535164  0.19822706
+#> [19]  0.24012315  0.20029294  0.19437860  0.15398120  0.08067874  0.01717084
 
 cat("glm model estimated coefficients：\n")
 #> glm model estimated coefficients：
