@@ -23,8 +23,11 @@ NegBinomHMC is an R package that implements Hamiltonian Monte Carlo (HMC) sampli
 ## Overview
 
 Negative Binomial regression is commonly used for modeling over-dispersed count data. With NegBinomHMC, you can:
+
 - **Simulate Data:** Generate synthetic datasets following a Negative Binomial distribution using a specified regression model.
+
 - **Model Evaluation:** Calculate the log-posterior and its gradient for your Negative Binomial regression model.
+
 - **Adaptive HMC Sampling:** Sample from the Bayesian posterior using an adaptive HMC sampler that tunes its step size during a warmup period to achieve a desired acceptance rate.
 
 This package is intended for educational purposes and as a starting point for more advanced Bayesian inference in count data models.
@@ -55,34 +58,34 @@ devtools::install_github("Kumachar/NegBinomHMC")
 ```
 
 ## Dual Averaging for Adaptive $\epsilon$
-Dual averaging adapts the HMC step size $\epsilon$ so that the acceptance
-probability approaches a target rate $\delta$ (e.g.\ $0.65$).  
+Dual averaging adapts the HMC step size $\epsilon$ so that the acceptance
+probability approaches a target rate $\delta$ (e.g.\ $0.65$).  
 At each warm‑up iteration it
 
-1. runs one HMC step and records the acceptance probability $\alpha_t$;
+1. runs one HMC step and records the acceptance probability $\alpha_t$;
 2. updates a running statistic that nudges $\log\epsilon$;
 3. smooths the update to stabilise convergence.
 
-### Update rules (Hoffman & Gelman 2014, as used in NUTS)
+### Update rules (Hoffman & Gelman 2014, as used in NUTS)
 
 \[
-H_t \;=\;
+H_t = 
 \Bigl(1-\frac{1}{t+t_0}\Bigr)H_{t-1}
-\;+\;
++
 \frac{1}{t+t_0}\,(\delta-\alpha_t),
 \]
 
 \[
 \log\tilde{\epsilon}_t
-=\;
-\mu \;-\; \frac{\sqrt{t}}{\gamma}\,H_t,
+=
+\mu - \frac{\sqrt{t}}{\gamma}\,H_t,
 \]
 
 \[
 \log\epsilon_t
-=\;
+=
 \kappa\,\log\tilde{\epsilon}_t
-\;+\;
++
 (1-\kappa)\,\log\epsilon_{t-1}.
 \]
 
@@ -90,14 +93,14 @@ H_t \;=\;
 
 | Symbol | Meaning | Typical value |
 |--------|---------|---------------|
-| $\alpha_t$ | Acceptance probability at iteration $t$ | – |
+| $\alpha_t$ | Acceptance probability at iteration $t$ | – |
 | $\delta$   | Target acceptance rate | $0.65$ |
 | $H_t$      | Running statistic for acceptance error | – |
-| $\mu$      | Initial guess for $\log\epsilon$ | $\log(10\,\epsilon_0)$ |
+| $\mu$      | Initial guess for $\log\epsilon$ | $\log(10\,\epsilon_0)$ |
 | $t_0$      | Extra weight on early iterations | $10$ |
 | $\gamma$   | Controls adaptation speed | $0.05$ |
 | $\kappa$   | Smoothing parameter | $0.75$ |
-| $\epsilon_t$ | Step size at iteration $t$ | – |
+| $\epsilon_t$ | Step size at iteration $t$ | – |
 
 After the warm‑up phase, fix $\epsilon$ to the final adapted value (or its
 average) for the sampling phase to preserve Markov‑chain validity.
@@ -195,7 +198,7 @@ cat("Final epsilon:", result$final_epsilon, "\n")
 
 In this analysis, we investigate the factors influencing the total number of injuries in traffic accidents. The data come from a traffic accidents dataset and include predictors such as lighting condition, number of units involved, day of the week, and month of the crash. Considering possible overdispersion in the count data, we use a Negative Binomial regression model. This document demonstrates how to fit the model using both a traditional approach (via `glm.nb` from the MASS package) and our custom Hamiltonian Monte Carlo (HMC) sampler.
 
-# Data Preprocessing
+### Data Preprocessing
 
 We start by reading in the `traffic_accidents.csv` file. The categorical variables are converted to factors, and numerical values (e.g., number of units) are properly set as numeric.
 

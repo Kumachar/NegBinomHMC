@@ -54,35 +54,35 @@ devtools::install_github("Kumachar/NegBinomHMC")
 
 ## Dual Averaging for Adaptive $\epsilon$
 
-Dual averaging adapts the HMC step size $\epsilon$ so that the
-acceptance probability approaches a target rate $\delta$
+Dual averaging adapts the HMC step size $\epsilon$ so that the
+acceptance probability approaches a target rate $\delta$
 (e.g. $0.65$).  
 At each warm‑up iteration it
 
-1.  runs one HMC step and records the acceptance probability $\alpha_t$;
+1.  runs one HMC step and records the acceptance probability $\alpha_t$;
 2.  updates a running statistic that nudges $\log\epsilon$;
 3.  smooths the update to stabilise convergence.
 
-### Update rules (Hoffman & Gelman 2014, as used in NUTS)
+### Update rules (Hoffman & Gelman 2014, as used in NUTS)
 
 $$
-H_t \;=\;
+H_t = 
 \Bigl(1-\frac{1}{t+t_0}\Bigr)H_{t-1}
-\;+\;
++
 \frac{1}{t+t_0}\,(\delta-\alpha_t),
 $$
 
 $$
 \log\tilde{\epsilon}_t
-=\;
-\mu \;-\; \frac{\sqrt{t}}{\gamma}\,H_t,
+=
+\mu - \frac{\sqrt{t}}{\gamma}\,H_t,
 $$
 
 $$
 \log\epsilon_t
-=\;
+=
 \kappa\,\log\tilde{\epsilon}_t
-\;+\;
++
 (1-\kappa)\,\log\epsilon_{t-1}.
 $$
 
@@ -90,14 +90,14 @@ $$
 
 | Symbol | Meaning | Typical value |
 |----|----|----|
-| $\alpha_t$ | Acceptance probability at iteration $t$ | – |
+| $\alpha_t$ | Acceptance probability at iteration $t$ | – |
 | $\delta$ | Target acceptance rate | $0.65$ |
 | $H_t$ | Running statistic for acceptance error | – |
-| $\mu$ | Initial guess for $\log\epsilon$ | $\log(10\,\epsilon_0)$ |
+| $\mu$ | Initial guess for $\log\epsilon$ | $\log(10\,\epsilon_0)$ |
 | $t_0$ | Extra weight on early iterations | $10$ |
 | $\gamma$ | Controls adaptation speed | $0.05$ |
 | $\kappa$ | Smoothing parameter | $0.75$ |
-| $\epsilon_t$ | Step size at iteration $t$ | – |
+| $\epsilon_t$ | Step size at iteration $t$ | – |
 
 After the warm‑up phase, fix $\epsilon$ to the final adapted value (or
 its average) for the sampling phase to preserve Markov‑chain validity.
@@ -233,7 +233,7 @@ Binomial regression model. This document demonstrates how to fit the
 model using both a traditional approach (via `glm.nb` from the MASS
 package) and our custom Hamiltonian Monte Carlo (HMC) sampler.
 
-# Data Preprocessing
+### Data Preprocessing
 
 We start by reading in the `traffic_accidents.csv` file. The categorical
 variables are converted to factors, and numerical values (e.g., number
