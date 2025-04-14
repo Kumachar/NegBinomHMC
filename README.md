@@ -52,7 +52,57 @@ You can install the development version of NegBinomHMC from
 devtools::install_github("Kumachar/NegBinomHMC")
 ```
 
-## Example
+## Dual Averaging for Adaptive $\epsilon$
+
+Dual averaging adapts the HMC step size $\epsilon$ so that the
+acceptance probability approaches a target rate $\delta$
+(e.g. $0.65$).  
+At each warm‑up iteration it
+
+1.  runs one HMC step and records the acceptance probability $\alpha_t$;
+2.  updates a running statistic that nudges $\log\epsilon$;
+3.  smooths the update to stabilise convergence.
+
+### Update rules (Hoffman & Gelman 2014, as used in NUTS)
+
+$$
+H_t \;=\;
+\Bigl(1-\frac{1}{t+t_0}\Bigr)H_{t-1}
+\;+\;
+\frac{1}{t+t_0}\,(\delta-\alpha_t),
+$$
+
+$$
+\log\tilde{\epsilon}_t
+=\;
+\mu \;-\; \frac{\sqrt{t}}{\gamma}\,H_t,
+$$
+
+$$
+\log\epsilon_t
+=\;
+\kappa\,\log\tilde{\epsilon}_t
+\;+\;
+(1-\kappa)\,\log\epsilon_{t-1}.
+$$
+
+### Symbol glossary
+
+| Symbol | Meaning | Typical value |
+|----|----|----|
+| $\alpha_t$ | Acceptance probability at iteration $t$ | – |
+| $\delta$ | Target acceptance rate | $0.65$ |
+| $H_t$ | Running statistic for acceptance error | – |
+| $\mu$ | Initial guess for $\log\epsilon$ | $\log(10\,\epsilon_0)$ |
+| $t_0$ | Extra weight on early iterations | $10$ |
+| $\gamma$ | Controls adaptation speed | $0.05$ |
+| $\kappa$ | Smoothing parameter | $0.75$ |
+| $\epsilon_t$ | Step size at iteration $t$ | – |
+
+After the warm‑up phase, fix $\epsilon$ to the final adapted value (or
+its average) for the sampling phase to preserve Markov‑chain validity.
+
+## Simulation Example
 
 Below is a basic example demonstrating how to simulate Negative
 Binomials data and run the adaptive HMC sampler to estimate the
@@ -92,11 +142,293 @@ result <- hmc_sampler(
 cat("True beta:", beta_true, "\n")
 #> True beta: 1 0 -1
 cat("Estimated beta (mean):", colMeans(result$samples), "\n")
-#> Estimated beta (mean): 0.9857302 -0.101327 -0.9700795
+#> Estimated beta (mean): 0.9841496 -0.102741 -0.9723564
 cat("Acceptance rate:", result$acceptance_rate, "\n")
-#> Acceptance rate: 0.7466667
+#> Acceptance rate: 0.734
 cat("Final epsilon:", result$final_epsilon, "\n")
-#> Final epsilon: 0.08763474
+#> Final epsilon: 0.08109449
+```
+
+## Real-World Example 1
+
+In this analysis, we investigate the factors influencing the number of
+days of absence among high school juniors. The data come from a study
+involving school administrators, where the predictors include the type
+of program in which a student is enrolled and a standardized math test
+score. Due to possible overdispersion in the count data, a Negative
+Binomial model is appropriate compared to a Poisson model.
+
+We use our HMC package (NegBinomHMC) to sample from the posterior
+distribution of a Negative Binomial regression model. This document
+details the steps for reading in the data, building the design matrix,
+running the HMC sampler, and comparing the results with a baseline
+model.
+
+### Data Reading and Preprocessing
+
+We start by reading the dataset using the `haven` package. The dataset
+is stored in a Stata file and contains variables such as `math`
+(standardized test score), `prog` (program type), and `daysabs` (number
+of absence days). We convert the program type to a factor variable for
+modeling.
+
+``` r
+library(haven)
+library(NegBinomHMC)
+dat <- read_dta("https://stats.idre.ucla.edu/stat/stata/dae/nb_data.dta")
+dat <- within(dat, {
+  prog <- factor(prog, levels = 1:3, labels = c("General", "Academic", "Vocational"))
+  id <- factor(id)
+})
+
+head(dat)
+#> # A tibble: 6 × 5
+#>   id    gender      math daysabs prog    
+#>   <fct> <dbl+lbl>  <dbl>   <dbl> <fct>   
+#> 1 1001  2 [male]      63       4 Academic
+#> 2 1002  2 [male]      27       4 Academic
+#> 3 1003  1 [female]    20       2 Academic
+#> 4 1004  1 [female]    16       3 Academic
+#> 5 1005  1 [female]     2       3 Academic
+#> 6 1006  1 [female]    71      13 Academic
+
+X <- model.matrix(~ math + prog, data = dat)
+y <- dat$daysabs
+r <- 2
+p <- ncol(X)
+# Define the log-posterior function for the negative binomial model
+# Fit a negative binomial regression model
+result <- hmc_sampler(
+  log_post = log_posterior_negbin,
+  grad_log_post = grad_log_posterior_negbin,
+  initial_beta = rep(0, p),
+  initial_epsilon = 0.01,
+  L = 10,
+  n_iter = 1000,
+  n_warmup = 500,
+  X = X,
+  y = y,
+  r = r,
+  beta_mu = 0,
+  beta_sigma = 1,
+  target_accept = 0.6
+)
+
+cat("Estimated beta (mean):", colMeans(result$samples), "\n")
+#> Estimated beta (mean): 2.354502 -0.005713888 -0.1490803 -0.9932917
+cat("Acceptance rate:", result$acceptance_rate, "\n")
+#> Acceptance rate: 0.7833333
+cat("Final epsilon:", result$final_epsilon, "\n")
+#> Final epsilon: 0.001292785
+```
+
+## Real-World Example 2
+
+In this analysis, we investigate the factors influencing the total
+number of injuries in traffic accidents. The data come from a traffic
+accidents dataset and include predictors such as lighting condition,
+number of units involved, day of the week, and month of the crash.
+Considering possible overdispersion in the count data, we use a Negative
+Binomial regression model. This document demonstrates how to fit the
+model using both a traditional approach (via `glm.nb` from the MASS
+package) and our custom Hamiltonian Monte Carlo (HMC) sampler.
+
+# Data Preprocessing
+
+We start by reading in the `traffic_accidents.csv` file. The categorical
+variables are converted to factors, and numerical values (e.g., number
+of units) are properly set as numeric.
+
+``` r
+library(NegBinomHMC)
+accidents <- read.csv("ExampleData/traffic_accidents.csv", stringsAsFactors = TRUE)
+
+accidents$weather_condition <- as.factor(accidents$weather_condition)
+accidents$lighting_condition <- as.factor(accidents$lighting_condition)
+accidents$crash_day_of_week <- as.factor(accidents$crash_day_of_week)
+accidents$crash_month <- as.factor(accidents$crash_month)
+accidents$num_units <- as.numeric(as.character(accidents$num_units))
+
+library(MASS)
+nb_model <- glm.nb(injuries_total ~ lighting_condition + num_units +
+                     crash_day_of_week + crash_month,
+                   data = accidents)
+summary(nb_model)
+#> 
+#> Call:
+#> glm.nb(formula = injuries_total ~ lighting_condition + num_units + 
+#>     crash_day_of_week + crash_month, data = accidents, init.theta = 0.7415346039, 
+#>     link = log)
+#> 
+#> Coefficients:
+#>                                           Estimate Std. Error z value Pr(>|z|)
+#> (Intercept)                              -2.042339   0.035051 -58.267  < 2e-16
+#> lighting_conditionDARKNESS, LIGHTED ROAD  0.104313   0.024323   4.289 1.80e-05
+#> lighting_conditionDAWN                   -0.049675   0.039932  -1.244 0.213509
+#> lighting_conditionDAYLIGHT               -0.152928   0.023708  -6.451 1.11e-10
+#> lighting_conditionDUSK                   -0.105643   0.034319  -3.078 0.002082
+#> lighting_conditionUNKNOWN                -0.931136   0.048197 -19.319  < 2e-16
+#> num_units                                 0.551718   0.008847  62.359  < 2e-16
+#> crash_day_of_week2                       -0.123353   0.017131  -7.200 6.00e-13
+#> crash_day_of_week3                       -0.161773   0.016949  -9.544  < 2e-16
+#> crash_day_of_week4                       -0.133067   0.016857  -7.894 2.93e-15
+#> crash_day_of_week5                       -0.161886   0.016827  -9.621  < 2e-16
+#> crash_day_of_week6                       -0.194597   0.016417 -11.854  < 2e-16
+#> crash_day_of_week7                       -0.115257   0.016531  -6.972 3.12e-12
+#> crash_month2                             -0.068891   0.024004  -2.870 0.004105
+#> crash_month3                              0.072389   0.023209   3.119 0.001815
+#> crash_month4                              0.137530   0.023104   5.953 2.64e-09
+#> crash_month5                              0.186414   0.022190   8.401  < 2e-16
+#> crash_month6                              0.198024   0.022031   8.989  < 2e-16
+#> crash_month7                              0.240459   0.021883  10.988  < 2e-16
+#> crash_month8                              0.200943   0.021839   9.201  < 2e-16
+#> crash_month9                              0.194849   0.021662   8.995  < 2e-16
+#> crash_month10                             0.154989   0.021457   7.223 5.08e-13
+#> crash_month11                             0.080318   0.022054   3.642 0.000271
+#> crash_month12                             0.017377   0.022093   0.787 0.431551
+#>                                             
+#> (Intercept)                              ***
+#> lighting_conditionDARKNESS, LIGHTED ROAD ***
+#> lighting_conditionDAWN                      
+#> lighting_conditionDAYLIGHT               ***
+#> lighting_conditionDUSK                   ** 
+#> lighting_conditionUNKNOWN                ***
+#> num_units                                ***
+#> crash_day_of_week2                       ***
+#> crash_day_of_week3                       ***
+#> crash_day_of_week4                       ***
+#> crash_day_of_week5                       ***
+#> crash_day_of_week6                       ***
+#> crash_day_of_week7                       ***
+#> crash_month2                             ** 
+#> crash_month3                             ** 
+#> crash_month4                             ***
+#> crash_month5                             ***
+#> crash_month6                             ***
+#> crash_month7                             ***
+#> crash_month8                             ***
+#> crash_month9                             ***
+#> crash_month10                            ***
+#> crash_month11                            ***
+#> crash_month12                               
+#> ---
+#> Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+#> 
+#> (Dispersion parameter for Negative Binomial(0.7415) family taken to be 1)
+#> 
+#>     Null deviance: 154736  on 209305  degrees of freedom
+#> Residual deviance: 149258  on 209282  degrees of freedom
+#> AIC: 334924
+#> 
+#> Number of Fisher Scoring iterations: 1
+#> 
+#> 
+#>               Theta:  0.74153 
+#>           Std. Err.:  0.00925 
+#> 
+#>  2 x log-likelihood:  -334874.20000
+
+nb_formula <- injuries_total ~ lighting_condition + num_units + crash_day_of_week + crash_month
+X <- model.matrix(nb_formula, data = accidents)
+y <- accidents$injuries_total
+
+r <- 0.74
+beta_mu <- rep(0, ncol(X))
+beta_sigma <- rep(10, ncol(X))
+
+initial_beta <- coef(nb_model)
+
+initial_epsilon <- 0.1 
+L <- 10 
+n_iter <- 1000
+n_warmup <- 500
+target_accept <- 0.65
+
+hmc_result <- hmc_sampler(
+  log_post = log_posterior_negbin,
+  grad_log_post = grad_log_posterior_negbin,
+  initial_beta = initial_beta,
+  initial_epsilon = initial_epsilon,
+  L = L,
+  n_iter = n_iter,
+  n_warmup = n_warmup,
+  X = X,
+  y = y,
+  r = r,
+  beta_mu = beta_mu,
+  beta_sigma = beta_sigma,
+  target_accept = target_accept
+)
+
+samples <- hmc_result$samples
+accept_rate <- hmc_result$acceptance_rate
+final_epsilon <- hmc_result$final_epsilon
+
+cat("HMC acceptance rate:", accept_rate, "\n")
+#> HMC acceptance rate: 0.8133333
+cat("final epsilon:", final_epsilon, "\n")
+#> final epsilon: 0.002526504
+
+posterior_means <- colMeans(samples)
+cat("HMC posterior mean：\n")
+#> HMC posterior mean：
+print(posterior_means)
+#>  [1] -2.03841619  0.10029438 -0.05236648 -0.15684310 -0.11067667 -0.93572419
+#>  [7]  0.55156213 -0.12301710 -0.16111867 -0.13256164 -0.16110311 -0.19399285
+#> [13] -0.11471802 -0.06841506  0.07254415  0.13646549  0.18535164  0.19822706
+#> [19]  0.24012315  0.20029294  0.19437860  0.15398120  0.08067874  0.01717084
+
+cat("glm model estimated coefficients：\n")
+#> glm model estimated coefficients：
+print(coef(nb_model))
+#>                              (Intercept) 
+#>                              -2.04233876 
+#> lighting_conditionDARKNESS, LIGHTED ROAD 
+#>                               0.10431344 
+#>                   lighting_conditionDAWN 
+#>                              -0.04967474 
+#>               lighting_conditionDAYLIGHT 
+#>                              -0.15292814 
+#>                   lighting_conditionDUSK 
+#>                              -0.10564299 
+#>                lighting_conditionUNKNOWN 
+#>                              -0.93113615 
+#>                                num_units 
+#>                               0.55171830 
+#>                       crash_day_of_week2 
+#>                              -0.12335267 
+#>                       crash_day_of_week3 
+#>                              -0.16177324 
+#>                       crash_day_of_week4 
+#>                              -0.13306748 
+#>                       crash_day_of_week5 
+#>                              -0.16188641 
+#>                       crash_day_of_week6 
+#>                              -0.19459695 
+#>                       crash_day_of_week7 
+#>                              -0.11525677 
+#>                             crash_month2 
+#>                              -0.06889150 
+#>                             crash_month3 
+#>                               0.07238907 
+#>                             crash_month4 
+#>                               0.13752991 
+#>                             crash_month5 
+#>                               0.18641419 
+#>                             crash_month6 
+#>                               0.19802407 
+#>                             crash_month7 
+#>                               0.24045914 
+#>                             crash_month8 
+#>                               0.20094291 
+#>                             crash_month9 
+#>                               0.19484940 
+#>                            crash_month10 
+#>                               0.15498857 
+#>                            crash_month11 
+#>                               0.08031843 
+#>                            crash_month12 
+#>                               0.01737741
 ```
 
 ## Contributing

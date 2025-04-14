@@ -54,7 +54,56 @@ You can install the development version of NegBinomHMC from [GitHub](https://git
 devtools::install_github("Kumachar/NegBinomHMC")
 ```
 
-## Example
+## Dual Averaging for Adaptive $\epsilon$
+Dual averaging adapts the HMC step size $\epsilon$ so that the acceptance
+probability approaches a target rate $\delta$ (e.g.\ $0.65$).  
+At each warm‑up iteration it
+
+1. runs one HMC step and records the acceptance probability $\alpha_t$;
+2. updates a running statistic that nudges $\log\epsilon$;
+3. smooths the update to stabilise convergence.
+
+### Update rules (Hoffman & Gelman 2014, as used in NUTS)
+
+\[
+H_t \;=\;
+\Bigl(1-\frac{1}{t+t_0}\Bigr)H_{t-1}
+\;+\;
+\frac{1}{t+t_0}\,(\delta-\alpha_t),
+\]
+
+\[
+\log\tilde{\epsilon}_t
+=\;
+\mu \;-\; \frac{\sqrt{t}}{\gamma}\,H_t,
+\]
+
+\[
+\log\epsilon_t
+=\;
+\kappa\,\log\tilde{\epsilon}_t
+\;+\;
+(1-\kappa)\,\log\epsilon_{t-1}.
+\]
+
+### Symbol glossary
+
+| Symbol | Meaning | Typical value |
+|--------|---------|---------------|
+| $\alpha_t$ | Acceptance probability at iteration $t$ | – |
+| $\delta$   | Target acceptance rate | $0.65$ |
+| $H_t$      | Running statistic for acceptance error | – |
+| $\mu$      | Initial guess for $\log\epsilon$ | $\log(10\,\epsilon_0)$ |
+| $t_0$      | Extra weight on early iterations | $10$ |
+| $\gamma$   | Controls adaptation speed | $0.05$ |
+| $\kappa$   | Smoothing parameter | $0.75$ |
+| $\epsilon_t$ | Step size at iteration $t$ | – |
+
+After the warm‑up phase, fix $\epsilon$ to the final adapted value (or its
+average) for the sampling phase to preserve Markov‑chain validity.
+
+
+## Simulation Example
 
 Below is a basic example demonstrating how to simulate Negative Binomials data and run the adaptive HMC sampler to estimate the regression coefficients.
 
@@ -94,6 +143,125 @@ cat("Estimated beta (mean):", colMeans(result$samples), "\n")
 cat("Acceptance rate:", result$acceptance_rate, "\n")
 cat("Final epsilon:", result$final_epsilon, "\n")
 ```
+
+## Real-World Example 1
+
+In this analysis, we investigate the factors influencing the number of days of absence among high school juniors. The data come from a study involving school administrators, where the predictors include the type of program in which a student is enrolled and a standardized math test score. Due to possible overdispersion in the count data, a Negative Binomial model is appropriate compared to a Poisson model.
+
+We use our HMC package (NegBinomHMC) to sample from the posterior distribution of a Negative Binomial regression model. This document details the steps for reading in the data, building the design matrix, running the HMC sampler, and comparing the results with a baseline model.
+
+### Data Reading and Preprocessing
+
+We start by reading the dataset using the `haven` package. The dataset is stored in a Stata file and contains variables such as `math` (standardized test score), `prog` (program type), and `daysabs` (number of absence days). We convert the program type to a factor variable for modeling.
+```{r real-world-example-1}
+library(haven)
+library(NegBinomHMC)
+dat <- read_dta("https://stats.idre.ucla.edu/stat/stata/dae/nb_data.dta")
+dat <- within(dat, {
+  prog <- factor(prog, levels = 1:3, labels = c("General", "Academic", "Vocational"))
+  id <- factor(id)
+})
+
+head(dat)
+
+X <- model.matrix(~ math + prog, data = dat)
+y <- dat$daysabs
+r <- 2
+p <- ncol(X)
+# Define the log-posterior function for the negative binomial model
+# Fit a negative binomial regression model
+result <- hmc_sampler(
+  log_post = log_posterior_negbin,
+  grad_log_post = grad_log_posterior_negbin,
+  initial_beta = rep(0, p),
+  initial_epsilon = 0.01,
+  L = 10,
+  n_iter = 1000,
+  n_warmup = 500,
+  X = X,
+  y = y,
+  r = r,
+  beta_mu = 0,
+  beta_sigma = 1,
+  target_accept = 0.6
+)
+
+cat("Estimated beta (mean):", colMeans(result$samples), "\n")
+cat("Acceptance rate:", result$acceptance_rate, "\n")
+cat("Final epsilon:", result$final_epsilon, "\n")
+```
+
+## Real-World Example 2
+
+In this analysis, we investigate the factors influencing the total number of injuries in traffic accidents. The data come from a traffic accidents dataset and include predictors such as lighting condition, number of units involved, day of the week, and month of the crash. Considering possible overdispersion in the count data, we use a Negative Binomial regression model. This document demonstrates how to fit the model using both a traditional approach (via `glm.nb` from the MASS package) and our custom Hamiltonian Monte Carlo (HMC) sampler.
+
+# Data Preprocessing
+
+We start by reading in the `traffic_accidents.csv` file. The categorical variables are converted to factors, and numerical values (e.g., number of units) are properly set as numeric.
+
+```{r real-world-example-2}
+library(NegBinomHMC)
+accidents <- read.csv("ExampleData/traffic_accidents.csv", stringsAsFactors = TRUE)
+
+accidents$weather_condition <- as.factor(accidents$weather_condition)
+accidents$lighting_condition <- as.factor(accidents$lighting_condition)
+accidents$crash_day_of_week <- as.factor(accidents$crash_day_of_week)
+accidents$crash_month <- as.factor(accidents$crash_month)
+accidents$num_units <- as.numeric(as.character(accidents$num_units))
+
+library(MASS)
+nb_model <- glm.nb(injuries_total ~ lighting_condition + num_units +
+                     crash_day_of_week + crash_month,
+                   data = accidents)
+summary(nb_model)
+
+nb_formula <- injuries_total ~ lighting_condition + num_units + crash_day_of_week + crash_month
+X <- model.matrix(nb_formula, data = accidents)
+y <- accidents$injuries_total
+
+r <- 0.74
+beta_mu <- rep(0, ncol(X))
+beta_sigma <- rep(10, ncol(X))
+
+initial_beta <- coef(nb_model)
+
+initial_epsilon <- 0.1 
+L <- 10 
+n_iter <- 1000
+n_warmup <- 500
+target_accept <- 0.65
+
+hmc_result <- hmc_sampler(
+  log_post = log_posterior_negbin,
+  grad_log_post = grad_log_posterior_negbin,
+  initial_beta = initial_beta,
+  initial_epsilon = initial_epsilon,
+  L = L,
+  n_iter = n_iter,
+  n_warmup = n_warmup,
+  X = X,
+  y = y,
+  r = r,
+  beta_mu = beta_mu,
+  beta_sigma = beta_sigma,
+  target_accept = target_accept
+)
+
+samples <- hmc_result$samples
+accept_rate <- hmc_result$acceptance_rate
+final_epsilon <- hmc_result$final_epsilon
+
+cat("HMC acceptance rate:", accept_rate, "\n")
+cat("final epsilon:", final_epsilon, "\n")
+
+posterior_means <- colMeans(samples)
+cat("HMC posterior mean：\n")
+print(posterior_means)
+
+cat("glm model estimated coefficients：\n")
+print(coef(nb_model))
+```
+
 
 ## Contributing
 Contributions to NegBinomHMC are welcome. If you encounter issues or have suggestions for improvements, please feel free to open an issue or submit a pull request on the GitHub repository.
