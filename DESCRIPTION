@@ -8,11 +8,12 @@ Authors@R: c(
       email = "wxhua@umich.edu",
       role = c("aut", "cre")
     )
-)
-Description: Provides tools for simulating and fitting Negative Binomial regression models
-    using Hamiltonian Monte Carlo (HMC). Includes functionality for log-posterior and gradient
-    computation, step-size adaptation, and posterior sampling for overdispersed count data.
-    Useful for Bayesian modeling of count outcomes where Poisson models are insufficient.
+  )
+Description: Provides tools for simulating and fitting Negative Binomial regression
+    models using Hamiltonian Monte Carlo (HMC). Includes functionality for
+    log-posterior and gradient computation, step-size adaptation, and posterior
+    sampling for overdispersed count data. Useful for Bayesian modeling of
+    count outcomes where Poisson models are insufficient.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
