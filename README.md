@@ -74,11 +74,16 @@ The update rules (from Hoffman & Gelman, 2014, used in NUTS) are:
 
 $$
 H_t = \left(1 - \frac{1}{t + t_0}\right) H_{t-1} + \frac{1}{t + t_0} (\delta - \alpha_t),
-$$ $$
+$$
+
+$$
 \log \tilde{\epsilon}_t = \mu - \frac{\sqrt{t}}{\gamma} H_t,
-$$ $$
+$$
+
+$$
 \log \epsilon_t = \kappa \log \tilde{\epsilon}_t + (1 - \kappa) \log \epsilon_{t-1},
 $$
+
 
 where:
 

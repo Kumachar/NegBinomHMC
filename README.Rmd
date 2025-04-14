@@ -72,9 +72,11 @@ The update rules (from Hoffman & Gelman, 2014, used in NUTS) are:
 \[
 H_t = \left(1 - \frac{1}{t + t_0}\right) H_{t-1} + \frac{1}{t + t_0} (\delta - \alpha_t),
 \]
+
 \[
 \log \tilde{\epsilon}_t = \mu - \frac{\sqrt{t}}{\gamma} H_t,
 \]
+
 \[
 \log \epsilon_t = \kappa \log \tilde{\epsilon}_t + (1 - \kappa) \log \epsilon_{t-1},
 \]
@@ -181,7 +183,6 @@ cat("Acceptance rate:", result$acceptance_rate, "\n")
 cat("Final epsilon:", result$final_epsilon, "\n")
 ```
 
-
 ## Real-World Example 2
 
 In this analysis, we investigate the factors influencing the total number of injuries in traffic accidents. The data come from a traffic accidents dataset and include predictors such as lighting condition, number of units involved, day of the week, and month of the crash. Considering possible overdispersion in the count data, we use a Negative Binomial regression model. This document demonstrates how to fit the model using both a traditional approach (via `glm.nb` from the MASS package) and our custom Hamiltonian Monte Carlo (HMC) sampler.
@@ -252,6 +253,7 @@ print(posterior_means)
 cat("glm model estimated coefficients：\n")
 print(coef(nb_model))
 ```
+
 
 ## Contributing
 Contributions to NegBinomHMC are welcome. If you encounter issues or have suggestions for improvements, please feel free to open an issue or submit a pull request on the GitHub repository.
