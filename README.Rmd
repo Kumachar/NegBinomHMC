@@ -149,7 +149,15 @@ mcmc_chain <- as.mcmc(posterior_samples)
 ess <- effectiveSize(mcmc_chain)
 
 # Display the effective sample sizes
+print("Effective Sample Size:")
 print(ess)
+
+# Length of CI
+ci_length <- apply(posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("Length of 95% CI for each parameter:")
+print( ci_length)
 
 
 # Trace plot
@@ -161,7 +169,7 @@ for (j in 1:p) {
 }
 
 ```
-```{r}
+```{r, warning=FALSE}
 ## Random Walk Metropolis Example
 # Prior hyperparameters: using N(0, 10^2) for each beta coefficient.
 beta_mu <- 0
@@ -205,7 +213,16 @@ par(mfrow = c(p, 1))
 # Effective sample size
 mcmc_chain <- as.mcmc(chain_metropolis)
 
+# Length of CI
+
+ci_length <- apply(posterior_samples_metropolis, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("Length of 95% CI for each parameter:")
+print( ci_length)
+
 # Calculate effective sample size for each parameter
+print("Effective Sample Size:")
 ess <- effectiveSize(mcmc_chain)
 
 # Display the effective sample sizes
@@ -229,7 +246,7 @@ We use our HMC package (NegBinomHMC) to sample from the posterior distribution o
 
 We start by reading the dataset using the `haven` package. The dataset is stored in a Stata file and contains variables such as `math` (standardized test score), `prog` (program type), and `daysabs` (number of absence days). We convert the program type to a factor variable for modeling.
 
-```{r real-world-example-1}
+```{r real-world-example-1, warning=FALSE}
 library(haven)
 library(NegBinomHMC)
 dat <- read_dta("https://stats.idre.ucla.edu/stat/stata/dae/nb_data.dta")
@@ -276,7 +293,7 @@ In this analysis, we investigate the factors influencing the total number of inj
 
 We start by reading in the `traffic_accidents.csv` file. The categorical variables are converted to factors, and numerical values (e.g., number of units) are properly set as numeric.
 
-```{r real-world-example-2}
+```{r real-world-example-2, warning=FALSE}
 library(NegBinomHMC)
 accidents <- read.csv("ExampleData/traffic_accidents.csv", stringsAsFactors = TRUE)
 
@@ -300,7 +317,7 @@ r <- 0.74
 beta_mu <- rep(0, ncol(X))
 beta_sigma <- rep(10, ncol(X))
 
-initial_beta <- coef(nb_model)
+initial_beta <- rep(0, ncol(X))
 
 initial_epsilon <- 0.1 
 L <- 10 
@@ -337,6 +354,45 @@ print(posterior_means)
 
 cat("glm model estimated coefficients：\n")
 print(coef(nb_model))
+
+ci_length <- apply(samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("Length of 95% CI for each parameter:")
+
+
+# Metropolis model
+## Random Walk Metropolis Example
+# Prior hyperparameters: using N(0, 10^2) for each beta coefficient.
+beta_mu <- 0
+beta_sigma <- 1  # In this example, we set sigma=1; adjust as needed.
+
+# Initial beta: starting at zero (vector of length p)
+proposal_sd <- 0.1
+iterations <- 1000
+
+chain_metropolis <- rw_metropolis(
+  log_post = log_posterior_negbin,
+  init = initial_beta,
+  iterations = iterations,
+  proposal_sd = proposal_sd,
+  X = X,
+  y = y,
+  r = r,
+  beta_mu = beta_mu,
+  beta_sigma = beta_sigma
+)
+
+cat("Random Walk Metropolis acceptance rate:", mean(diff(chain_metropolis) != 0), "\n")
+cat("Random Walk Metropolis posterior mean：\n")
+print(colMeans(chain_metropolis))
+
+ci_length <- apply(chain_metropolis, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("Length of 95% CI for each parameter:")
+print( ci_length)
+
 ```
 
 ## Contributing

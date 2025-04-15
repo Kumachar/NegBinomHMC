@@ -138,7 +138,7 @@ result <- hmc_sampler(
 )
 end_time <- Sys.time()
 print(paste("HMC runtime:", end_time - start_time))
-#> [1] "HMC runtime: 0.583175182342529"
+#> [1] "HMC runtime: 0.664206981658936"
 cat("True beta:", beta_true, "\n")
 #> True beta: 1 0 -1
 cat("Estimated beta (mean):", colMeans(result$samples), "\n")
@@ -166,9 +166,21 @@ mcmc_chain <- as.mcmc(posterior_samples)
 ess <- effectiveSize(mcmc_chain)
 
 # Display the effective sample sizes
+print("Effective Sample Size:")
+#> [1] "Effective Sample Size:"
 print(ess)
 #>      beta_1      beta_2      beta_3 
 #> 1943.104478    7.238143 1217.820448
+
+# Length of CI
+ci_length <- apply(posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("Length of 95% CI for each parameter:")
+#> [1] "Length of 95% CI for each parameter:"
+print( ci_length)
+#>    beta_1    beta_2    beta_3 
+#> 0.2673753 0.2288583 0.2981192
 
 
 # Trace plot
@@ -211,7 +223,7 @@ chain_metropolis <- rw_metropolis(
 end_time <- Sys.time()
 rwm_runtime <- end_time - start_time
 print(paste("Random Walk Metropolis runtime:", rwm_runtime))
-#> [1] "Random Walk Metropolis runtime: 0.0809979438781738"
+#> [1] "Random Walk Metropolis runtime: 0.0769038200378418"
 
 #Results for Random-walk Metropolis
 cat("Estimated beta (mean):", colMeans(chain_metropolis), "\n")
@@ -236,7 +248,20 @@ par(mfrow = c(p, 1))
 # Effective sample size
 mcmc_chain <- as.mcmc(chain_metropolis)
 
+# Length of CI
+
+ci_length <- apply(posterior_samples_metropolis, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("Length of 95% CI for each parameter:")
+#> [1] "Length of 95% CI for each parameter:"
+print( ci_length)
+#>    beta_1    beta_2    beta_3 
+#> 0.4744858 0.3462910 0.3438163
+
 # Calculate effective sample size for each parameter
+print("Effective Sample Size:")
+#> [1] "Effective Sample Size:"
 ess <- effectiveSize(mcmc_chain)
 
 # Display the effective sample sizes
@@ -279,7 +304,6 @@ modeling.
 
 ``` r
 library(haven)
-#> Warning: 程辑包'haven'是用R版本4.4.2 来建造的
 library(NegBinomHMC)
 dat <- read_dta("https://stats.idre.ucla.edu/stat/stata/dae/nb_data.dta")
 dat <- within(dat, {
@@ -320,8 +344,6 @@ result <- hmc_sampler(
   beta_sigma = 1,
   target_accept = 0.6
 )
-#> Warning in hmc_sampler(log_post = log_posterior_negbin, grad_log_post =
-#> grad_log_posterior_negbin, : Final acceptance rate 0.2 may indicate poor tuning
 
 cat("Estimated beta (mean):", colMeans(result$samples), "\n")
 #> Estimated beta (mean): 1.902437 -0.006174328 0.3706828 -0.4976668
@@ -449,7 +471,7 @@ r <- 0.74
 beta_mu <- rep(0, ncol(X))
 beta_sigma <- rep(10, ncol(X))
 
-initial_beta <- coef(nb_model)
+initial_beta <- rep(0, ncol(X))
 
 initial_epsilon <- 0.1 
 L <- 10 
@@ -478,18 +500,18 @@ accept_rate <- hmc_result$acceptance_rate
 final_epsilon <- hmc_result$final_epsilon
 
 cat("HMC acceptance rate:", accept_rate, "\n")
-#> HMC acceptance rate: 0.7746667
+#> HMC acceptance rate: 0.77
 cat("final epsilon:", final_epsilon, "\n")
-#> final epsilon: 0.002351411
+#> final epsilon: 0.002352611
 
 posterior_means <- colMeans(samples)
 cat("HMC posterior mean：\n")
 #> HMC posterior mean：
 print(posterior_means)
-#>  [1] -2.03668334  0.10348355 -0.05168951 -0.15363955 -0.10478216 -0.93282915
-#>  [7]  0.55069749 -0.12471820 -0.16342610 -0.13432435 -0.16357831 -0.19576166
-#> [13] -0.11662058 -0.07072630  0.07071162  0.13542235  0.18529603  0.19729990
-#> [19]  0.23897216  0.19959878  0.19387525  0.15318368  0.07822794  0.01550998
+#>  [1] -2.03647089  0.10335490 -0.05196786 -0.15374859 -0.10501588 -0.93278662
+#>  [7]  0.55068760 -0.12486118 -0.16355794 -0.13446035 -0.16372417 -0.19589568
+#> [13] -0.11675803 -0.07072025  0.07084653  0.13546341  0.18532619  0.19737446
+#> [19]  0.23900509  0.19964439  0.19392164  0.15324451  0.07826874  0.01553934
 
 cat("glm model estimated coefficients：\n")
 #> glm model estimated coefficients：
@@ -542,6 +564,57 @@ print(coef(nb_model))
 #>                               0.08031843 
 #>                            crash_month12 
 #>                               0.01737741
+
+ci_length <- apply(samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("Length of 95% CI for each parameter:")
+#> [1] "Length of 95% CI for each parameter:"
+
+
+# Metropolis model
+## Random Walk Metropolis Example
+# Prior hyperparameters: using N(0, 10^2) for each beta coefficient.
+beta_mu <- 0
+beta_sigma <- 1  # In this example, we set sigma=1; adjust as needed.
+
+# Initial beta: starting at zero (vector of length p)
+proposal_sd <- 0.1
+iterations <- 1000
+
+chain_metropolis <- rw_metropolis(
+  log_post = log_posterior_negbin,
+  init = initial_beta,
+  iterations = iterations,
+  proposal_sd = proposal_sd,
+  X = X,
+  y = y,
+  r = r,
+  beta_mu = beta_mu,
+  beta_sigma = beta_sigma
+)
+
+cat("Random Walk Metropolis acceptance rate:", mean(diff(chain_metropolis) != 0), "\n")
+#> Random Walk Metropolis acceptance rate: 0.02802803
+cat("Random Walk Metropolis posterior mean：\n")
+#> Random Walk Metropolis posterior mean：
+print(colMeans(chain_metropolis))
+#>  [1] -1.060384109  0.009815559 -0.147515341 -0.283283709 -0.222347967
+#>  [6] -0.391487583  0.249149414 -0.155903797 -0.162312955 -0.218263403
+#> [11] -0.194385119 -0.280619494 -0.131255941 -0.064928272 -0.083335460
+#> [16] -0.065789248 -0.081008720  0.218748968 -0.033343195  0.106777933
+#> [21] -0.081251588 -0.111895116 -0.085212160 -0.130615423
+
+ci_length <- apply(chain_metropolis, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("Length of 95% CI for each parameter:")
+#> [1] "Length of 95% CI for each parameter:"
+print( ci_length)
+#>  [1] 0.8705835 0.2959814 0.6721309 0.3473314 0.4279881 0.8882957 0.4752401
+#>  [8] 0.2657398 0.2692784 0.3868275 0.4574971 0.4432469 0.5031121 0.6455981
+#> [15] 0.5130934 0.7547416 0.2646949 1.0346993 0.4200339 0.3677683 0.2987375
+#> [22] 0.3571136 0.6439414 0.5250106
 ```
 
 ## Contributing
