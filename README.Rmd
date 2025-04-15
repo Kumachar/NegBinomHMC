@@ -78,6 +78,8 @@ $$
 \log \tilde{\epsilon}_t = \mu - \frac{\sqrt{t}}{\gamma} H_t,
 $$
 
+and,
+
 $$
 \log \epsilon_t = \kappa \log \tilde{\epsilon}_t + (1 - \kappa) \log \epsilon_{t-1},
 $$
@@ -393,8 +395,8 @@ ci_length <- apply(chain_metropolis, 2, function(x) {
 })
 print("Length of 95% CI for each parameter:")
 print( ci_length)
-
 ```
+
 
 ## Contributing
 

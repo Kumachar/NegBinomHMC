@@ -80,6 +80,8 @@ $$
 \log \tilde{\epsilon}_t = \mu - \frac{\sqrt{t}}{\gamma} H_t,
 $$
 
+and,
+
 $$
 \log \epsilon_t = \kappa \log \tilde{\epsilon}_t + (1 - \kappa) \log \epsilon_{t-1},
 $$
@@ -138,7 +140,7 @@ result <- hmc_sampler(
 )
 end_time <- Sys.time()
 print(paste("HMC runtime:", end_time - start_time))
-#> [1] "HMC runtime: 0.372952938079834"
+#> [1] "HMC runtime: 0.362106084823608"
 cat("True beta:", beta_true, "\n")
 #> True beta: 1 0 -1
 cat("Estimated beta (mean):", colMeans(result$samples), "\n")
@@ -223,7 +225,7 @@ chain_metropolis <- rw_metropolis(
 end_time <- Sys.time()
 rwm_runtime <- end_time - start_time
 print(paste("Random Walk Metropolis runtime:", rwm_runtime))
-#> [1] "Random Walk Metropolis runtime: 0.0449690818786621"
+#> [1] "Random Walk Metropolis runtime: 0.0437359809875488"
 
 #Results for Random-walk Metropolis
 cat("Estimated beta (mean):", colMeans(chain_metropolis), "\n")
