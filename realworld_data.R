@@ -7,7 +7,6 @@ dat <- within(dat, {
 })
 
 head(dat)
-
 X <- model.matrix(~ math + prog, data = dat)
 y <- dat$daysabs
 r <- 2

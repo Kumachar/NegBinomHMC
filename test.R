@@ -49,3 +49,45 @@ for (j in 1:p) {
   abline(h = beta_true[j], col = "red", lwd = 2)
 }
 
+
+# Prior hyperparameters: using N(0, 10^2) for each beta coefficient.
+beta_mu <- 0
+beta_sigma <- 1  # In this example, we set sigma=1; adjust as needed.
+
+# Initial beta: starting at zero (vector of length p)
+init_beta <- rep(0, p)
+
+# Sampler settings
+iterations <- 1000
+proposal_sd <- 0.1  # Standard deviation for each proposal increment
+
+# Run the sampler
+chain_metropolis <- rw_metropolis(
+  log_post    = log_posterior_negbin,
+  init        = init_beta,
+  iterations  = iterations,
+  proposal_sd = proposal_sd,
+  X           = X,
+  y           = y,
+  r           = r,
+  beta_mu     = beta_mu,
+  beta_sigma  = beta_sigma
+)
+
+#Results for Random-walk Metropolis
+cat("Estimated beta (mean):", colMeans(chain_metropolis), "\n")
+cat("Acceptance rate:", mean(diff(chain_metropolis) != 0), "\n")
+
+# Posterior summaries
+posterior_samples_metropolis <- chain_metropolis
+colnames(posterior_samples_metropolis) <- paste0("beta_", 1:p)
+summary(posterior_samples_metropolis)
+# Trace plot
+par(mfrow = c(p, 1))
+
+for (j in 1:p) {
+  plot(posterior_samples_metropolis[, j], type = "l", 
+       main = paste("Trace plot for beta", j), ylab = "Value", xlab = "Iteration")
+  abline(h = beta_true[j], col = "red", lwd = 2)
+}
+
