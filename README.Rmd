@@ -359,6 +359,7 @@ ci_length <- apply(samples, 2, function(x) {
   quantile(x, 0.975) - quantile(x, 0.025)
 })
 print("Length of 95% CI for each parameter:")
+print(ci_length)
 
 
 # Metropolis model

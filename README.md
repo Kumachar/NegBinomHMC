@@ -138,7 +138,7 @@ result <- hmc_sampler(
 )
 end_time <- Sys.time()
 print(paste("HMC runtime:", end_time - start_time))
-#> [1] "HMC runtime: 0.664206981658936"
+#> [1] "HMC runtime: 0.372952938079834"
 cat("True beta:", beta_true, "\n")
 #> True beta: 1 0 -1
 cat("Estimated beta (mean):", colMeans(result$samples), "\n")
@@ -223,7 +223,7 @@ chain_metropolis <- rw_metropolis(
 end_time <- Sys.time()
 rwm_runtime <- end_time - start_time
 print(paste("Random Walk Metropolis runtime:", rwm_runtime))
-#> [1] "Random Walk Metropolis runtime: 0.0769038200378418"
+#> [1] "Random Walk Metropolis runtime: 0.0449690818786621"
 
 #Results for Random-walk Metropolis
 cat("Estimated beta (mean):", colMeans(chain_metropolis), "\n")
@@ -390,10 +390,6 @@ summary(nb_model)
 #> glm.nb(formula = injuries_total ~ lighting_condition + num_units + 
 #>     crash_day_of_week + crash_month, data = accidents, init.theta = 0.7415346039, 
 #>     link = log)
-#> 
-#> Deviance Residuals: 
-#>     Min       1Q   Median       3Q      Max  
-#> -2.3278  -0.7741  -0.7420   0.3144   7.1521  
 #> 
 #> Coefficients:
 #>                                           Estimate Std. Error z value Pr(>|z|)
@@ -570,6 +566,11 @@ ci_length <- apply(samples, 2, function(x) {
 })
 print("Length of 95% CI for each parameter:")
 #> [1] "Length of 95% CI for each parameter:"
+print(ci_length)
+#>  [1] 0.12586756 0.08794023 0.14680625 0.08724283 0.13665972 0.18972666
+#>  [7] 0.03600563 0.06950765 0.06622217 0.06869137 0.06736958 0.06483087
+#> [13] 0.07032123 0.10251326 0.09199487 0.08950584 0.09014538 0.09027470
+#> [19] 0.08816141 0.08531449 0.08661121 0.09107790 0.09443526 0.09149120
 
 
 # Metropolis model
