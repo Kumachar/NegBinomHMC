@@ -107,7 +107,6 @@ regression coefficients.
 ``` r
 library(NegBinomHMC)
 library(coda)
-#> Warning: 程辑包'coda'是用R版本4.4.2 来建造的
 
 # Set simulation parameters
 n <- 200              # Number of observations

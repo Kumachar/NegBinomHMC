@@ -99,7 +99,7 @@ After a warm-up phase, we fix `epsilon` to the final adapted value for the sampl
 
 Below is a basic example demonstrating how to simulate Negative Binomials data and run the adaptive HMC sampler to estimate the regression coefficients.
 
-```{r example}
+```{r example, warning=FALSE}
 library(NegBinomHMC)
 library(coda)
 
