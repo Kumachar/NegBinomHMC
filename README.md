@@ -40,7 +40,7 @@ NegBinomHMC/
 │   ├── simulation.R       # Data simulation function
 │   ├── negbin_model.R             # Negative Binomial model function
 │   ├── hmc_sampler.R                # Adaptive HMC sampler and helper functions
-|   ├── rw_metropolis_model.R       # Random walk Metropolis model
+│    ├── rw_metropolis_model.R       # Random walk Metropolis model
 ├── man/              # Documentation files (generated via roxygen2)
 ├── README.md         # This file
 └── LICENSE           # License file
@@ -140,7 +140,7 @@ result <- hmc_sampler(
 )
 end_time <- Sys.time()
 print(paste("HMC runtime:", end_time - start_time))
-#> [1] "HMC runtime: 0.362106084823608"
+#> [1] "HMC runtime: 0.368154048919678"
 cat("True beta:", beta_true, "\n")
 #> True beta: 1 0 -1
 cat("Estimated beta (mean):", colMeans(result$samples), "\n")
@@ -225,7 +225,7 @@ chain_metropolis <- rw_metropolis(
 end_time <- Sys.time()
 rwm_runtime <- end_time - start_time
 print(paste("Random Walk Metropolis runtime:", rwm_runtime))
-#> [1] "Random Walk Metropolis runtime: 0.0437359809875488"
+#> [1] "Random Walk Metropolis runtime: 0.0452439785003662"
 
 #Results for Random-walk Metropolis
 cat("Estimated beta (mean):", colMeans(chain_metropolis), "\n")
@@ -618,6 +618,131 @@ print( ci_length)
 #>  [8] 0.2657398 0.2692784 0.3868275 0.4574971 0.4432469 0.5031121 0.6455981
 #> [15] 0.5130934 0.7547416 0.2646949 1.0346993 0.4200339 0.3677683 0.2987375
 #> [22] 0.3571136 0.6439414 0.5250106
+
+# Load necessary libraries
+library(ggplot2)
+
+# --- Assign column names if they are missing ---
+if (is.null(colnames(samples)) || length(colnames(samples)) == 0) {
+  colnames(samples) <- colnames(X)
+}
+if (is.null(colnames(chain_metropolis)) || length(colnames(chain_metropolis)) == 0) {
+  colnames(chain_metropolis) <- colnames(X)
+}
+
+# ===== Compute HMC estimates and CI =====
+# Posterior means from your HMC sampling:
+hmc_mean <- colMeans(samples)
+
+# Compute the HMC 95% credible intervals using the 2.5% and 97.5% quantiles:
+hmc_ci_lower <- apply(samples, 2, quantile, probs = 0.025)
+hmc_ci_upper <- apply(samples, 2, quantile, probs = 0.975)
+
+
+# --- Compute Random Walk Metropolis summaries ---
+rwm_mean    <- colMeans(chain_metropolis)
+rwm_ci_lower <- apply(chain_metropolis, 2, quantile, probs = 0.025)
+rwm_ci_upper <- apply(chain_metropolis, 2, quantile, probs = 0.975)
+
+# ===== Compute GLM estimates and CI =====
+# Coefficients from the NB model:
+glm_coef <- coef(nb_model)
+
+# Compute the 95% confidence intervals for the NB model (profile likelihood-based by default):
+glm_ci <- confint(nb_model)
+#> Waiting for profiling to be done...
+# glm_ci is a matrix with two columns (lower, upper). Its rownames should match the parameter names.
+
+# ===== Prepare a data frame for plotting =====
+# Define parameter names from the design matrix (or the samples)
+params <- colnames(X)
+
+# Create the data frame for plotting:
+df_combined <- data.frame(
+  Parameter = rep(params, 3),
+  Method = factor(rep(c("HMC", "GLM", "RWM"), each = length(params))),
+  Estimate = c(hmc_mean, glm_coef, rwm_mean),
+  CI_Lower = c(hmc_ci_lower, glm_ci[, 1], rwm_ci_lower),
+  CI_Upper = c(hmc_ci_upper, glm_ci[, 2], rwm_ci_upper)
+)
+
+
+# Optionally, order the parameter factor to preserve the original order:
+df_combined$Parameter <- factor(df_combined$Parameter, levels = params)
+
+
+
+# ===== Create the plot =====
+# Use ggplot2 to plot point estimates and error bars for the 95% intervals.
+ggplot(df_combined, aes(x = Parameter, y = Estimate, color = Method)) +
+  geom_point(position = position_dodge(width = 0.6), size = 3) +
+  geom_errorbar(aes(ymin = CI_Lower, ymax = CI_Upper),
+                width = 0.2,
+                position = position_dodge(width = 0.6)) +
+  theme_bw() +
+  labs(title = "Parameter Estimates with 95% Intervals",
+       x = "Parameter",
+       y = "Coefficient Value") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+<img src="man/figures/README-real-world-example-2-1.png" width="100%" />
+
+``` r
+
+
+first_three <- params[1:3]
+
+# --- Set up the plotting area: 2 rows (first row for HMC, second row for RWM), 3 columns ---
+par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
+
+# --- Generate trace plots for HMC and add mean line ---
+for (i in 1:3) {
+  param_name <- first_three[i]
+  plot(samples[, param_name],
+       type = "l",
+       main = paste("HMC Trace:", param_name),
+       xlab = "Iteration",
+       ylab = "Value")
+  
+  # Compute the mean for HMC for this parameter
+  hmc_mean_val <- mean(samples[, param_name])
+  
+  # Add a horizontal dashed line at the mean (red)
+  abline(h = hmc_mean_val, col = "red", lwd = 2, lty = 2)
+  
+  # Add a legend indicating the mean value
+  legend("topright", legend = paste("Mean:", round(hmc_mean_val, 3)), 
+         bty = "n", col = "red", lty = 2, cex = 0.8)
+}
+
+# --- Generate trace plots for RWM and add mean line ---
+for (i in 1:3) {
+  param_name <- first_three[i]
+  plot(chain_metropolis[, param_name],
+       type = "l",
+       main = paste("RWM Trace:", param_name),
+       xlab = "Iteration",
+       ylab = "Value")
+  
+  # Compute the mean for RWM for this parameter
+  rwm_mean_val <- mean(chain_metropolis[, param_name])
+  
+  # Add a horizontal dashed line at the mean (blue)
+  abline(h = rwm_mean_val, col = "blue", lwd = 2, lty = 2)
+  
+  # Add a legend indicating the mean value
+  legend("topright", legend = paste("Mean:", round(rwm_mean_val, 3)), 
+         bty = "n", col = "blue", lty = 2, cex = 0.8)
+}
+```
+
+<img src="man/figures/README-real-world-example-2-2.png" width="100%" />
+
+``` r
+
+# Reset the plotting layout to one plot per window
+par(mfrow = c(1, 1))
 ```
 
 ## Contributing
