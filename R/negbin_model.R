@@ -28,14 +28,9 @@ log_posterior_negbin_log_r <- function(theta, X, y, beta_mu, beta_sigma, alpha_r
   eta <- X %*% beta
   mu <- exp(eta)
   
-  # Log-likelihood
   log_likelihood <- sum(lgamma(y + r) - lgamma(r) - lgamma(y + 1) +
                           r * log(r) + y * eta - (r + y) * log(r + mu))
-  
-  # Log-prior for beta (normal)
   log_prior_beta <- sum(dnorm(beta, beta_mu, beta_sigma, log = TRUE))
-  
-  # Log-prior for r (gamma) with Jacobian adjustment
   log_prior_r <- dgamma(r, shape = alpha_r, rate = beta_r, log = TRUE) + phi
   
   return(log_likelihood + log_prior_beta + log_prior_r)
@@ -71,12 +66,12 @@ grad_log_posterior_negbin_log_r <- function(theta, X, y, beta_mu, beta_sigma, al
   eta <- X %*% beta
   mu <- exp(eta)
   
-  # Gradient with respect to beta
+
   grad_ll_beta <- t(X) %*% (y - ((r + y) * mu) / (r + mu))
   grad_prior_beta <- -(beta - beta_mu) / beta_sigma^2
   
   # Gradient with respect to phi
-  # Check for small r to prevent numerical instability
+  # Stabilize, check for small r to prevent numerical instability
   if (r < 1e-6) {
     # Return a large negative gradient to push phi away from very negative values
     grad_phi <- -1e6

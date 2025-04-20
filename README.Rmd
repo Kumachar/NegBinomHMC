@@ -43,7 +43,6 @@ NegBinomHMC/
 │   ├── simulation.R       # Data simulation function
 │   ├── negbin_model.R             # Negative Binomial model function
 │   ├── hmc_sampler.R                # Adaptive HMC sampler and helper functions
-│    ├── rw_metropolis_model.R       # Random walk Metropolis model
 ├── man/              # Documentation files (generated via roxygen2)
 ├── README.md         # This file
 └── LICENSE           # License file
@@ -100,7 +99,7 @@ After a warm-up phase, we fix `epsilon` to the final adapted value for the sampl
 
 ## Simulation Example
 
-Below is a basic example demonstrating how to simulate Negative Binomials data and run the adaptive HMC sampler to estimate the regression coefficients.
+Below is a basic example demonstrating how to simulate Negative Binomials data and run the adaptive HMC sampler to estimate the regression coefficients. You can play with example by altering the params. To contrast the result we used a package called `MCMCpack` to run a random walk Metropolis sampler. It provides a function called `MCMCnegbin` to fit a Negative Binomial regression model using a random walk Metropolis algorithm. Unlike our approach, it estimates the dispersion parameter `r` based on the outcome of generalized linear model (GLM). `MCMCnegbin` fails to provide valid estimates of `r` when the number of observations is less than 200 (not converge) or over 2000 (takes too many memories), while our HMC sampler can handle a larger range of observations. Here we set the number of observations to 500, which is a good trade-off between speed and accuracy. You can also try to increase the number of observations to 2000 and see the difference of these two methods.
 
 ```{r Simulation, warning=FALSE}
 library(NegBinomHMC)
@@ -108,7 +107,7 @@ library(coda)
 set.seed(123)
 
 # Set simulation parameters
-n <- 200              # Number of observations
+n <- 500              # Number of observations
 p <- 3                # Number of predictors (including intercept)
 beta_true <- c(3, 5, -3)  # True regression coefficients
 r_true <- 2           # True dispersion parameter
@@ -201,9 +200,17 @@ for (j in 1:p) {
        ylab = "Density")
   abline(v = beta_true[j], col = "red", lwd = 2)
 }
+par(mfrow = c(1, 2))
 plot(r_samples, type = "l", 
      main = "Trace plot for r", ylab = "Value", xlab = "Iteration")
 abline(h = r_true, col = "red", lwd = 2)
+plot(density(r_samples), 
+     main = "Density plot for r",
+     xlab = "Value",
+     ylab = "Density")
+abline(v = r_true, col = "red", lwd = 2)
+
+par(mfrow = c(1, 1))
 
 ```
 
@@ -258,46 +265,163 @@ We start by reading the dataset using the `haven` package. The dataset is stored
 
 ```{r real-world-example-1, warning=FALSE}
 library(haven)
-set.seed(123)
+library(NegBinomHMC)
+library(MCMCpack)
+library(MASS)
+library(ggplot2)
 
+set.seed(123)
 dat <- read_dta("https://stats.idre.ucla.edu/stat/stata/dae/nb_data.dta")
 dat <- within(dat, {
-  prog <- factor(prog, levels = 1:3, labels = c("General", "Academic", "Vocational"))
+  prog <- factor(prog, levels = 1:3,
+                 labels = c("General","Academic","Vocational"))
   id <- factor(id)
 })
 
-head(dat)
-
+# Design matrix and response
 X <- model.matrix(~ math + prog, data = dat)
 y <- dat$daysabs
 p <- ncol(X)
 
-# Define the log-posterior function for the negative binomial model
-# Fit a negative binomial regression model
+# 1) Frequentist negative‑binomial
+glm_fit <- glm.nb(daysabs ~ math + prog, data = dat)
 
-result <- hmc_sampler(
-  log_post = log_posterior_negbin_log_r,
-  grad_log_post = grad_log_posterior_negbin_log_r,
-  initial_theta = c(rep(0, p), log(10)),  # Initial beta = 0, phi = log(10)
+# 2) HMC sampling
+hmc_res <- hmc_sampler(
+  log_post        = log_posterior_negbin_log_r,
+  grad_log_post   = grad_log_posterior_negbin_log_r,
+  initial_theta   = c(rep(0, p), log(10)),  # β=0, φ=log(10)
   initial_epsilon = 0.01,
-  L = 10,
-  n_iter = 10000,
-  n_warmup = 5000,
-  X = X,
-  y = y,
-  beta_mu = 0,
-  beta_sigma = 1,
-  alpha_r = 5,    # Gamma prior shape for r
-  beta_r = 2,     # Gamma prior rate for r
-  target_accept = 0.5
+  L               = 10,
+  n_iter          = 10000,
+  n_warmup        = 5000,
+  X               = X, y = y,
+  beta_mu         = 0,
+  beta_sigma      = 1,
+  alpha_r         = 5,
+  beta_r          = 2,
+  target_accept   = 0.5
+)
+hmc_samps <- hmc_res$samples
+r_hmc     <- exp(hmc_samps[, p + 1])
+
+# 3) Random‑walk Metropolis
+rwm_chain <- MCMCnegbin(
+  formula = daysabs ~ math + prog,
+  data    = dat,
+  burnin  = 0,
+  mcmc    = 10000,
+  tune    = 1,
+  b0      = rep(0, p),
+  B0      = diag(1, p),  # prior precision = 1 / 1²
+  a0      = 5,
+  c0      = 2,
+  verbose = 0
 )
 
-r_samples <- exp(result$samples[, p + 1])
+# 4) Summaries: means & 95% CIs
+params <- c(colnames(X), "r")
 
-cat("Estimated beta (mean):", colMeans(result$samples[, 1:p]), "\n")
-cat("Estimated r (mean):", mean(r_samples), "\n")
-cat("Acceptance rate:", result$acceptance_rate, "\n")
-cat("Final epsilon:", result$final_epsilon, "\n")
+# HMC
+hmc_means    <- c(colMeans(hmc_samps[, 1:p]),      mean(r_hmc))
+hmc_ci_lower <- c(apply(hmc_samps[, 1:p], 2, quantile, probs = .025),
+                   quantile(r_hmc, .025))
+hmc_ci_upper <- c(apply(hmc_samps[, 1:p], 2, quantile, probs = .975),
+                   quantile(r_hmc, .975))
+names(hmc_means) <- names(hmc_ci_lower) <- names(hmc_ci_upper) <- params
+
+# GLM
+glm_means <- c(coef(glm_fit), r = glm_fit$theta)
+conf_glm  <- confint(glm_fit)
+glm_ci_lower <- glm_ci_upper <- rep(NA, length(params))
+names(glm_ci_lower) <- names(glm_ci_upper) <- params
+for(nm in rownames(conf_glm)) {
+  glm_ci_lower[nm] <- conf_glm[nm, 1]
+  glm_ci_upper[nm] <- conf_glm[nm, 2]
+}
+
+# RWM
+rwm_means    <- colMeans(rwm_chain)
+rwm_ci_lower <- apply(rwm_chain, 2, quantile, probs = .025)
+rwm_ci_upper <- apply(rwm_chain, 2, quantile, probs = .975)
+
+# 5) Build long data.frame for β’s
+df_beta <- data.frame(
+  Parameter = rep(colnames(X), 3),
+  Method    = factor(rep(c("HMC","GLM","RWM"), each = p),
+                     levels = c("HMC","GLM","RWM")),
+  Estimate  = c(hmc_means[colnames(X)],
+                glm_means[colnames(X)],
+                rwm_means[colnames(X)]),
+  CI_Lower  = c(hmc_ci_lower[colnames(X)],
+                glm_ci_lower[colnames(X)],
+                rwm_ci_lower[colnames(X)]),
+  CI_Upper  = c(hmc_ci_upper[colnames(X)],
+                glm_ci_upper[colnames(X)],
+                rwm_ci_upper[colnames(X)])
+)
+df_beta$Parameter <- factor(df_beta$Parameter, levels = colnames(X))
+
+df_beta$CI_length <- df_beta$CI_Upper - df_beta$CI_Lower
+
+# 6) Plot β’s with 95% CIs, add length of CIs
+ggplot(df_beta, aes(x = Parameter, y = Estimate, color = Method)) +
+  geom_point(position = position_dodge(width = 0.6), size = 3) +
+  geom_errorbar(aes(ymin = CI_Lower, ymax = CI_Upper),
+                position = position_dodge(width = 0.6), width = 0.2) +
+  # label the CI length
+  geom_text(aes(label = round(CI_length, 2),    # round as needed
+                y     = CI_Upper),              # position text at top of bar
+            position = position_dodge(width = 0.6),
+            vjust    = -0.5,                    # nudge it a bit higher
+            size     = 3) +                     # text size
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "β Estimates with 95% CIs\n(Length of CI shown above)",
+       x     = NULL,
+       y     = "Estimate")
+
+# 7) Plot dispersion “r”
+df_r <- data.frame(
+  Parameter = factor("r"),
+  Method    = factor(c("HMC","GLM","RWM"),
+                     levels = c("HMC","GLM","RWM")),
+  Estimate  = c(hmc_means["r"], glm_means["r"], rwm_means["r"]),
+  CI_Lower  = c(hmc_ci_lower["r"], glm_ci_lower["r"], rwm_ci_lower["r"]),
+  CI_Upper  = c(hmc_ci_upper["r"], glm_ci_upper["r"], rwm_ci_upper["r"])
+)
+
+ggplot(df_r, aes(x = Parameter, y = Estimate, color = Method)) +
+  geom_point(position = position_dodge(width = 0.3), size = 4) +
+  geom_errorbar(aes(ymin = CI_Lower, ymax = CI_Upper),
+                position = position_dodge(width = 0.3), width = 0.1) +
+  theme_bw() +
+  labs(title = "Dispersion (r) Estimates with 95% CIs", x = NULL, y = "Value")
+
+
+
+# HMC trace & density
+par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
+for(pn in 1:3) {
+  plot(hmc_samps[,pn], type="l", main=paste("HMC Trace:", pn),
+       xlab="Iteration", ylab="Value")
+  abline(h = hmc_means[pn], col = "red", lty = 2)
+}
+for(pn in 1:3) {
+  d <- density(hmc_samps[,pn])
+  plot(d, main=paste("HMC Density:", pn),
+       xlab="Value", ylab="Density")
+  abline(v = hmc_means[pn], col = "red", lty = 2)
+}
+par(mfrow = c(1, 1))
+
+# RWM trace
+for(pn in 1:3) {
+  plot(rwm_chain[,pn], type="l", main=paste("RWM Trace:", pn),
+       xlab="Iteration", ylab="Value")
+  abline(h = rwm_means[pn], col = "blue", lty = 2)
+}
+
 ```
 
 ## Real-World Example 2
