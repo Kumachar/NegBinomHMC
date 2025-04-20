@@ -17,4 +17,4 @@ Description: Provides tools for simulating and fitting Negative Binomial regress
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
-RoxygenNote: 7.3.1
+RoxygenNote: 7.3.2
