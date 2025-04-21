@@ -261,6 +261,7 @@ par(mfrow = c(1, 1))
 
 
 ```
+
 ### p (number of parameters) = 3, n (number of observations) = 500 
 ```{r 500, echo=TRUE, message=FALSE, warning=FALSE}
 set.seed(123)
@@ -503,6 +504,7 @@ for (method_idx in 1:3) {
 
 par(mfrow = c(1, 1))
 ```
+
 ### p (number of parameters) = 3, n (number of observations) = 1000
 ```{r 1000, echo=TRUE, message=FALSE, warning=FALSE}
 set.seed(123)
@@ -745,6 +747,7 @@ for (method_idx in 1:3) {
 
 par(mfrow = c(1, 1))
 ```
+
 ### p (number of parameters) = 3, n (number of observations) = 2000
 ```{r 2000, echo=TRUE, message=FALSE, warning=FALSE}
 set.seed(123)
