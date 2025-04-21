@@ -1,0 +1,1068 @@
+---
+title: "Simulation_exp"
+output: html_document
+date: "2025-04-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Simulation Experiment
+### p (number of parameters) = 3, n (number of observations) = 200
+```{r 200,  echo=TRUE, message=FALSE, warning=FALSE}
+library(NegBinomHMC)
+library(MCMCpack)
+library(coda)
+library(MASS)
+set.seed(123)
+mcmcnegabin_results <- {}
+mcmc_hmc_results <- {}
+mcmc_rwm_results <- {}
+
+
+# Set simulation parameters
+n <- 200              # Number of observations
+p <- 3                # Number of predictors (including intercept)
+beta_true <- c(3, 5, -3)  # True regression coefficients
+r_true <- 2           # True dispersion parameter
+
+# Simulate Negative Binomial data
+data <- simulate_negbin_data(n, p, beta_true, r_true, seed = 123)
+X <- data$X
+y <- data$y
+df <- data.frame(
+  y = y,
+  x1 = X[, 2],          # drop the intercept column
+  x2 = X[, 3]
+)
+
+# Prior hyperparameters
+beta_mu <- rep(0, p)
+beta_sigma <- rep(1, p)
+alpha_r <- 5    # Stronger prior to avoid small r
+beta_r <- 2     # Prior mean = 5/2 = 2.5, variance = 5/4 = 1.25
+
+# Fit glm.nb for initial theta
+nb_model <- glm.nb(y ~ x1 + x2, data = df)
+theta_start <- nb_model$theta
+
+# Run the adaptive HMC sampler
+initial_beta <- rep(0, p)  # Initial beta coefficients
+initial_beta[3] <- -1
+initial_theta <- c(initial_beta, log(2))  # Initial beta, phi = log(2)
+start_time <- Sys.time()
+result <- hmc_sampler(
+  log_post = log_posterior_negbin_log_r,
+  grad_log_post = grad_log_posterior_negbin_log_r,
+  initial_theta = initial_theta,
+  initial_epsilon = 0.005,  # Smaller step size
+  L = 20,                   # More leapfrog steps
+  n_iter = 10000,
+  n_warmup = 5000,
+  X = X,
+  y = y,
+  beta_mu = beta_mu,
+  beta_sigma = beta_sigma,
+  alpha_r = alpha_r,
+  beta_r = beta_r,
+  target_accept = 0.8
+)
+end_time <- Sys.time()
+print(paste("HMC runtime:", end_time - start_time))
+
+# Transform phi samples back to r for reporting
+r_samples <- exp(result$samples[, p + 1])
+
+# HMC Results
+cat("True beta:", beta_true, "\n")
+cat("True r:", r_true, "\n")
+cat("Estimated beta (mean):", colMeans(result$samples[, 1:p]), "\n")
+cat("Estimated r (mean):", mean(r_samples), "\n")
+cat("HMC Acceptance rate:", result$acceptance_rate, "\n")
+cat("HMC Final epsilon:", result$final_epsilon, "\n")
+
+# HMC Posterior summaries
+posterior_samples <- cbind(result$samples[, 1:p], r_samples)
+colnames(posterior_samples) <- c(paste0("beta_", 1:p), "r")
+summary(posterior_samples)
+mcmc_hmc_results <- append(mcmc_hmc_results, list(posterior_samples))
+
+# HMC Effective sample size
+mcmc_chain_hmc <- as.mcmc(posterior_samples)
+ess_hmc <- effectiveSize(mcmc_chain_hmc)
+print("HMC Effective Sample Size:")
+print(ess_hmc)
+
+# HMC Length of 95% CI
+ci_length_hmc <- apply(posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("HMC Length of 95% CI for each parameter:")
+print(ci_length_hmc)
+
+# Run Random Walk Metropolis using MCMCmetrop1R
+log_post_wrapper <- function(theta) {
+  log_posterior_negbin_log_r(theta, X = X, y = y, 
+                             beta_mu = beta_mu, beta_sigma = beta_sigma, 
+                             alpha_r = alpha_r, beta_r = beta_r)
+}
+start_time <- Sys.time()
+rwm_draws <- MCMCmetrop1R(
+  fun = log_post_wrapper,
+  theta.init = initial_theta,  # Same initial values as HMC
+  burnin = 5000,
+  mcmc = 10000,
+  thin = 1,
+  tune = 0.1,  # Tuning for proposal SD
+  verbose = 0,
+  logfun = TRUE,
+  seed = 123
+)
+end_time <- Sys.time()
+print(paste("RWM runtime:", end_time - start_time))
+
+# Transform phi samples back to r for RWM
+rwm_r_samples <- exp(rwm_draws[, p + 1])
+
+# RWM Results
+cat("RWM Estimated beta (mean):", colMeans(rwm_draws[, 1:p]), "\n")
+cat("RWM Estimated r (mean):", mean(rwm_r_samples), "\n")
+mat <- as.matrix(rwm_draws)
+changed <- apply(diff(mat) != 0, 1, any)
+accept_rate_rwm <- mean(changed)
+cat("RWM Acceptance rate:", accept_rate_rwm, "\n")
+
+# RWM Posterior summaries
+rwm_posterior_samples <- cbind(rwm_draws[, 1:p], rwm_r_samples)
+colnames(rwm_posterior_samples) <- c(paste0("beta_", 1:p), "r")
+summary(rwm_posterior_samples)
+mcmc_rwm_results <- append(mcmc_rwm_results, list(rwm_posterior_samples))
+
+# RWM Effective sample size
+mcmc_chain_rwm <- as.mcmc(rwm_posterior_samples)
+ess_rwm <- effectiveSize(mcmc_chain_rwm)
+print("RWM Effective Sample Size:")
+print(ess_rwm)
+
+# RWM Length of 95% CI
+ci_length_rwm <- apply(rwm_posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("RWM Length of 95% CI for each parameter:")
+print(ci_length_rwm)
+
+# Run MCMCnegbin
+start_time <- Sys.time()
+mcmcnegbin_draws <- MCMCnegbin(
+  y ~ x1 + x2,
+  data = df,
+  burnin = 5000,
+  mcmc = 10000,
+  thin = 1,
+  tune = 0.4,  # Smaller tune to avoid NaN
+  b0 = beta_mu,
+  B0 = diag(1/beta_sigma^2, p),
+  a0 = alpha_r,
+  c0 = beta_r,
+  theta.start = theta_start,
+  control = list(maxit = 1000),
+  verbose = 0,
+  seed = 123
+)
+end_time <- Sys.time()
+print(paste("MCMCnegbin runtime:", end_time - start_time))
+
+# MCMCnegbin Results
+cat("MCMCnegbin Estimated beta (mean):", colMeans(mcmcnegbin_draws), "\n")
+mat <- as.matrix(mcmcnegbin_draws)
+changed <- apply(diff(mat) != 0, 1, any)
+accept_rate_mcmcnegbin <- mean(changed)
+cat("MCMCnegbin Acceptance rate:", accept_rate_mcmcnegbin, "\n")
+
+# MCMCnegbin Posterior summaries
+mcmcnegbin_posterior_samples <- as.matrix(mcmcnegbin_draws)
+colnames(mcmcnegbin_posterior_samples) <- paste0("beta_", 1:p)
+summary(mcmcnegbin_posterior_samples)
+mcmcnegabin_results <- append(mcmcnegabin_results, list(mcmcnegbin_posterior_samples))
+
+# MCMCnegbin Effective sample size
+mcmc_chain_mcmcnegbin <- as.mcmc(mcmcnegbin_posterior_samples)
+ess_mcmcnegbin <- effectiveSize(mcmc_chain_mcmcnegbin)
+print("MCMCnegbin Effective Sample Size:")
+print(ess_mcmcnegbin)
+acceptance_rate_mcmcnegbin <- mean(apply(diff(mcmcnegbin_posterior_samples) != 0, 1, any))
+
+# MCMCnegbin Length of 95% CI
+ci_length_mcmcnegbin <- apply(mcmcnegbin_posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("MCMCnegbin Length of 95% CI for each parameter:")
+print(ci_length_mcmcnegbin)
+
+# Results comparison
+df_result <- data.frame(
+  method = c("HMC", "RWM", "MCMCnegbin"),
+  beta_1 = c(mean(result$samples[, 1]), mean(rwm_draws[, 1]), mean(mcmcnegbin_draws[, 1])),
+  ess_beta_1 = c(ess_hmc[1], ess_rwm[1], ess_mcmcnegbin[1]),
+  beta_2 = c(mean(result$samples[, 2]), mean(rwm_draws[, 2]), mean(mcmcnegbin_draws[, 2])),
+  ess_beta_2 = c(ess_hmc[2], ess_rwm[2], ess_mcmcnegbin[2]),
+  beta_3 = c(mean(result$samples[, 3]), mean(rwm_draws[, 3]), mean(mcmcnegbin_draws[, 3])),
+  ess_beta_3 = c(ess_hmc[3], ess_rwm[3], ess_mcmcnegbin[3]),
+  r = c(mean(r_samples), mean(rwm_r_samples), NA),  # NA for MCMCnegbin
+  ess_r = c(ess_hmc[4], ess_rwm[4], NA),           # NA for MCMCnegbin
+  acceptance_rate = c(result$acceptance_rate, accept_rate_rwm, accept_rate_mcmcnegbin)
+)
+print("Comparison of HMC, RWM, and MCMCnegbin:")
+print(df_result)
+
+# Trace and density plots
+par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
+param_names <- c(paste0("beta_", 1:p), "r")
+samples_list <- list(
+  hmc = posterior_samples,
+  rwm = rwm_posterior_samples,
+  mcmcnegbin = mcmcnegbin_posterior_samples
+)
+true_values <- c(beta_true, r_true)
+method_names <- c("HMC", "RWM", "MCMCnegbin")
+colors <- c("red", "blue", "green")
+
+for (method_idx in 1:3) {
+  samples <- samples_list[[method_idx]]
+  method <- method_names[method_idx]
+  col <- colors[method_idx]
+  max_j <- ifelse(method_idx == 3, 3, 4)  # Only beta_1, beta_2, beta_3 for MCMCnegbin
+  
+  for (j in 1:max_j) {
+    param <- param_names[j]
+    true_val <- true_values[j]
+    if (method_idx == 3 && j == 4) next  # Skip r for MCMCnegbin
+    
+    # Trace plot
+    plot(samples[, j], type = "l", 
+         main = paste(method, "Trace:", param),
+         xlab = "Iteration",
+         ylab = "Value",
+         col = col)
+    abline(h = true_val, col = "black", lwd = 2, lty = 2)
+    
+    # Density plot
+    plot(density(samples[, j]), 
+         main = paste(method, "Density:", param),
+         xlab = "Value",
+         ylab = "Density",
+         col = col, lwd = 2)
+    abline(v = true_val, col = "black", lwd = 2, lty = 2)
+  }
+}
+
+par(mfrow = c(1, 1))
+
+
+```
+### p (number of parameters) = 3, n (number of observations) = 500 
+```{r 500, echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(123)
+
+# Set simulation parameters
+n <- 500              # Number of observations
+p <- 3                # Number of predictors (including intercept)
+beta_true <- c(3, 5, -3)  # True regression coefficients
+r_true <- 2           # True dispersion parameter
+
+# Simulate Negative Binomial data
+data <- simulate_negbin_data(n, p, beta_true, r_true, seed = 123)
+X <- data$X
+y <- data$y
+df <- data.frame(
+  y = y,
+  x1 = X[, 2],          # drop the intercept column
+  x2 = X[, 3]
+)
+
+# Prior hyperparameters
+beta_mu <- rep(0, p)
+beta_sigma <- rep(1, p)
+alpha_r <- 5    # Stronger prior to avoid small r
+beta_r <- 2     # Prior mean = 5/2 = 2.5, variance = 5/4 = 1.25
+
+# Fit glm.nb for initial theta
+nb_model <- glm.nb(y ~ x1 + x2, data = df)
+theta_start <- nb_model$theta
+
+# Run the adaptive HMC sampler
+initial_beta <- rep(0, p)  # Initial beta coefficients
+initial_beta[3] <- -1
+initial_theta <- c(initial_beta, log(2))  # Initial beta, phi = log(2)
+start_time <- Sys.time()
+result <- hmc_sampler(
+  log_post = log_posterior_negbin_log_r,
+  grad_log_post = grad_log_posterior_negbin_log_r,
+  initial_theta = initial_theta,
+  initial_epsilon = 0.005,  # Smaller step size
+  L = 20,                   # More leapfrog steps
+  n_iter = 10000,
+  n_warmup = 5000,
+  X = X,
+  y = y,
+  beta_mu = beta_mu,
+  beta_sigma = beta_sigma,
+  alpha_r = alpha_r,
+  beta_r = beta_r,
+  target_accept = 0.8
+)
+end_time <- Sys.time()
+print(paste("HMC runtime:", end_time - start_time))
+
+# Transform phi samples back to r for reporting
+r_samples <- exp(result$samples[, p + 1])
+
+# HMC Results
+cat("True beta:", beta_true, "\n")
+cat("True r:", r_true, "\n")
+cat("Estimated beta (mean):", colMeans(result$samples[, 1:p]), "\n")
+cat("Estimated r (mean):", mean(r_samples), "\n")
+cat("HMC Acceptance rate:", result$acceptance_rate, "\n")
+cat("HMC Final epsilon:", result$final_epsilon, "\n")
+
+# HMC Posterior summaries
+posterior_samples <- cbind(result$samples[, 1:p], r_samples)
+colnames(posterior_samples) <- c(paste0("beta_", 1:p), "r")
+summary(posterior_samples)
+mcmc_hmc_results <- append(mcmc_hmc_results, list(posterior_samples))
+
+# HMC Effective sample size
+mcmc_chain_hmc <- as.mcmc(posterior_samples)
+ess_hmc <- effectiveSize(mcmc_chain_hmc)
+print("HMC Effective Sample Size:")
+print(ess_hmc)
+
+# HMC Length of 95% CI
+ci_length_hmc <- apply(posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("HMC Length of 95% CI for each parameter:")
+print(ci_length_hmc)
+
+# Run Random Walk Metropolis using MCMCmetrop1R
+log_post_wrapper <- function(theta) {
+  log_posterior_negbin_log_r(theta, X = X, y = y, 
+                             beta_mu = beta_mu, beta_sigma = beta_sigma, 
+                             alpha_r = alpha_r, beta_r = beta_r)
+}
+start_time <- Sys.time()
+rwm_draws <- MCMCmetrop1R(
+  fun = log_post_wrapper,
+  theta.init = initial_theta,  # Same initial values as HMC
+  burnin = 5000,
+  mcmc = 10000,
+  thin = 1,
+  tune = 0.1,  # Tuning for proposal SD
+  verbose = 0,
+  logfun = TRUE,
+  seed = 123
+)
+end_time <- Sys.time()
+print(paste("RWM runtime:", end_time - start_time))
+
+# Transform phi samples back to r for RWM
+rwm_r_samples <- exp(rwm_draws[, p + 1])
+
+# RWM Results
+cat("RWM Estimated beta (mean):", colMeans(rwm_draws[, 1:p]), "\n")
+cat("RWM Estimated r (mean):", mean(rwm_r_samples), "\n")
+mat <- as.matrix(rwm_draws)
+changed <- apply(diff(mat) != 0, 1, any)
+accept_rate_rwm <- mean(changed)
+cat("RWM Acceptance rate:", accept_rate_rwm, "\n")
+
+# RWM Posterior summaries
+rwm_posterior_samples <- cbind(rwm_draws[, 1:p], rwm_r_samples)
+colnames(rwm_posterior_samples) <- c(paste0("beta_", 1:p), "r")
+summary(rwm_posterior_samples)
+mcmc_rwm_results <- append(mcmc_rwm_results, list(rwm_posterior_samples))
+
+# RWM Effective sample size
+mcmc_chain_rwm <- as.mcmc(rwm_posterior_samples)
+ess_rwm <- effectiveSize(mcmc_chain_rwm)
+print("RWM Effective Sample Size:")
+print(ess_rwm)
+
+# RWM Length of 95% CI
+ci_length_rwm <- apply(rwm_posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("RWM Length of 95% CI for each parameter:")
+print(ci_length_rwm)
+
+# Run MCMCnegbin
+start_time <- Sys.time()
+mcmcnegbin_draws <- MCMCnegbin(
+  y ~ x1 + x2,
+  data = df,
+  burnin = 5000,
+  mcmc = 10000,
+  thin = 1,
+  tune = 0.5,  # Smaller tune to avoid NaN
+  b0 = beta_mu,
+  B0 = diag(1/beta_sigma^2, p),
+  a0 = alpha_r,
+  c0 = beta_r,
+  theta.start = theta_start,
+  control = list(maxit = 100),
+  verbose = 0,
+  seed = 123
+)
+end_time <- Sys.time()
+print(paste("MCMCnegbin runtime:", end_time - start_time))
+
+# MCMCnegbin Results
+cat("MCMCnegbin Estimated beta (mean):", colMeans(mcmcnegbin_draws), "\n")
+mat <- as.matrix(mcmcnegbin_draws)
+changed <- apply(diff(mat) != 0, 1, any)
+accept_rate_mcmcnegbin <- mean(changed)
+cat("MCMCnegbin Acceptance rate:", accept_rate_mcmcnegbin, "\n")
+
+# MCMCnegbin Posterior summaries
+mcmcnegbin_posterior_samples <- as.matrix(mcmcnegbin_draws)
+colnames(mcmcnegbin_posterior_samples) <- paste0("beta_", 1:p)
+summary(mcmcnegbin_posterior_samples)
+mcmcnegabin_results <- append(mcmcnegabin_results, list(mcmcnegbin_posterior_samples))
+
+# MCMCnegbin Effective sample size
+mcmc_chain_mcmcnegbin <- as.mcmc(mcmcnegbin_posterior_samples)
+ess_mcmcnegbin <- effectiveSize(mcmc_chain_mcmcnegbin)
+print("MCMCnegbin Effective Sample Size:")
+print(ess_mcmcnegbin)
+acceptance_rate_mcmcnegbin <- mean(apply(diff(mcmcnegbin_posterior_samples) != 0, 1, any))
+
+# MCMCnegbin Length of 95% CI
+ci_length_mcmcnegbin <- apply(mcmcnegbin_posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("MCMCnegbin Length of 95% CI for each parameter:")
+print(ci_length_mcmcnegbin)
+
+# Results comparison
+df_result <- data.frame(
+  method = c("HMC", "RWM", "MCMCnegbin"),
+  beta_1 = c(mean(result$samples[, 1]), mean(rwm_draws[, 1]), mean(mcmcnegbin_draws[, 1])),
+  ess_beta_1 = c(ess_hmc[1], ess_rwm[1], ess_mcmcnegbin[1]),
+  beta_2 = c(mean(result$samples[, 2]), mean(rwm_draws[, 2]), mean(mcmcnegbin_draws[, 2])),
+  ess_beta_2 = c(ess_hmc[2], ess_rwm[2], ess_mcmcnegbin[2]),
+  beta_3 = c(mean(result$samples[, 3]), mean(rwm_draws[, 3]), mean(mcmcnegbin_draws[, 3])),
+  ess_beta_3 = c(ess_hmc[3], ess_rwm[3], ess_mcmcnegbin[3]),
+  r = c(mean(r_samples), mean(rwm_r_samples), NA),  # NA for MCMCnegbin
+  ess_r = c(ess_hmc[4], ess_rwm[4], NA),           # NA for MCMCnegbin
+  acceptance_rate = c(result$acceptance_rate, accept_rate_rwm, accept_rate_mcmcnegbin)
+)
+print("Comparison of HMC, RWM, and MCMCnegbin:")
+print(df_result)
+
+# Trace and density plots
+par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
+param_names <- c(paste0("beta_", 1:p), "r")
+samples_list <- list(
+  hmc = posterior_samples,
+  rwm = rwm_posterior_samples,
+  mcmcnegbin = mcmcnegbin_posterior_samples
+)
+true_values <- c(beta_true, r_true)
+method_names <- c("HMC", "RWM", "MCMCnegbin")
+colors <- c("red", "blue", "green")
+
+for (method_idx in 1:3) {
+  samples <- samples_list[[method_idx]]
+  method <- method_names[method_idx]
+  col <- colors[method_idx]
+  max_j <- ifelse(method_idx == 3, 3, 4)  # Only beta_1, beta_2, beta_3 for MCMCnegbin
+  
+  for (j in 1:max_j) {
+    param <- param_names[j]
+    true_val <- true_values[j]
+    if (method_idx == 3 && j == 4) next  # Skip r for MCMCnegbin
+    
+    # Trace plot
+    plot(samples[, j], type = "l", 
+         main = paste(method, "Trace:", param),
+         xlab = "Iteration",
+         ylab = "Value",
+         col = col)
+    abline(h = true_val, col = "black", lwd = 2, lty = 2)
+    
+    # Density plot
+    plot(density(samples[, j]), 
+         main = paste(method, "Density:", param),
+         xlab = "Value",
+         ylab = "Density",
+         col = col, lwd = 2)
+    abline(v = true_val, col = "black", lwd = 2, lty = 2)
+  }
+}
+
+par(mfrow = c(1, 1))
+```
+### p (number of parameters) = 3, n (number of observations) = 1000
+```{r 1000, echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(123)
+
+# Set simulation parameters
+n <- 1000              # Number of observations
+p <- 3                # Number of predictors (including intercept)
+beta_true <- c(3, 5, -3)  # True regression coefficients
+r_true <- 2           # True dispersion parameter
+
+# Simulate Negative Binomial data
+data <- simulate_negbin_data(n, p, beta_true, r_true, seed = 123)
+X <- data$X
+y <- data$y
+df <- data.frame(
+  y = y,
+  x1 = X[, 2],          # drop the intercept column
+  x2 = X[, 3]
+)
+
+# Prior hyperparameters
+beta_mu <- rep(0, p)
+beta_sigma <- rep(1, p)
+alpha_r <- 5    # Stronger prior to avoid small r
+beta_r <- 2     # Prior mean = 5/2 = 2.5, variance = 5/4 = 1.25
+
+# Fit glm.nb for initial theta
+nb_model <- glm.nb(y ~ x1 + x2, data = df)
+theta_start <- nb_model$theta
+
+# Run the adaptive HMC sampler
+initial_beta <- rep(0, p)  # Initial beta coefficients
+initial_beta[3] <- -1
+initial_theta <- c(initial_beta, log(2))  # Initial beta, phi = log(2)
+start_time <- Sys.time()
+result <- hmc_sampler(
+  log_post = log_posterior_negbin_log_r,
+  grad_log_post = grad_log_posterior_negbin_log_r,
+  initial_theta = initial_theta,
+  initial_epsilon = 0.005,  # Smaller step size
+  L = 20,                   # More leapfrog steps
+  n_iter = 10000,
+  n_warmup = 5000,
+  X = X,
+  y = y,
+  beta_mu = beta_mu,
+  beta_sigma = beta_sigma,
+  alpha_r = alpha_r,
+  beta_r = beta_r,
+  target_accept = 0.8
+)
+end_time <- Sys.time()
+print(paste("HMC runtime:", end_time - start_time))
+
+# Transform phi samples back to r for reporting
+r_samples <- exp(result$samples[, p + 1])
+
+# HMC Results
+cat("True beta:", beta_true, "\n")
+cat("True r:", r_true, "\n")
+cat("Estimated beta (mean):", colMeans(result$samples[, 1:p]), "\n")
+cat("Estimated r (mean):", mean(r_samples), "\n")
+cat("HMC Acceptance rate:", result$acceptance_rate, "\n")
+cat("HMC Final epsilon:", result$final_epsilon, "\n")
+
+# HMC Posterior summaries
+posterior_samples <- cbind(result$samples[, 1:p], r_samples)
+colnames(posterior_samples) <- c(paste0("beta_", 1:p), "r")
+summary(posterior_samples)
+mcmc_hmc_results <- append(mcmc_hmc_results, list(posterior_samples))
+
+# HMC Effective sample size
+mcmc_chain_hmc <- as.mcmc(posterior_samples)
+ess_hmc <- effectiveSize(mcmc_chain_hmc)
+print("HMC Effective Sample Size:")
+print(ess_hmc)
+
+# HMC Length of 95% CI
+ci_length_hmc <- apply(posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("HMC Length of 95% CI for each parameter:")
+print(ci_length_hmc)
+
+# Run Random Walk Metropolis using MCMCmetrop1R
+log_post_wrapper <- function(theta) {
+  log_posterior_negbin_log_r(theta, X = X, y = y, 
+                             beta_mu = beta_mu, beta_sigma = beta_sigma, 
+                             alpha_r = alpha_r, beta_r = beta_r)
+}
+start_time <- Sys.time()
+rwm_draws <- MCMCmetrop1R(
+  fun = log_post_wrapper,
+  theta.init = initial_theta,  # Same initial values as HMC
+  burnin = 5000,
+  mcmc = 10000,
+  thin = 1,
+  tune = 0.1,  # Tuning for proposal SD
+  verbose = 0,
+  logfun = TRUE,
+  seed = 123
+)
+end_time <- Sys.time()
+print(paste("RWM runtime:", end_time - start_time))
+
+# Transform phi samples back to r for RWM
+rwm_r_samples <- exp(rwm_draws[, p + 1])
+
+# RWM Results
+cat("RWM Estimated beta (mean):", colMeans(rwm_draws[, 1:p]), "\n")
+cat("RWM Estimated r (mean):", mean(rwm_r_samples), "\n")
+mat <- as.matrix(rwm_draws)
+changed <- apply(diff(mat) != 0, 1, any)
+accept_rate_rwm <- mean(changed)
+cat("RWM Acceptance rate:", accept_rate_rwm, "\n")
+
+# RWM Posterior summaries
+rwm_posterior_samples <- cbind(rwm_draws[, 1:p], rwm_r_samples)
+colnames(rwm_posterior_samples) <- c(paste0("beta_", 1:p), "r")
+summary(rwm_posterior_samples)
+mcmc_rwm_results <- append(mcmc_rwm_results, list(rwm_posterior_samples))
+
+# RWM Effective sample size
+mcmc_chain_rwm <- as.mcmc(rwm_posterior_samples)
+ess_rwm <- effectiveSize(mcmc_chain_rwm)
+print("RWM Effective Sample Size:")
+print(ess_rwm)
+
+# RWM Length of 95% CI
+ci_length_rwm <- apply(rwm_posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("RWM Length of 95% CI for each parameter:")
+print(ci_length_rwm)
+
+# Run MCMCnegbin
+start_time <- Sys.time()
+mcmcnegbin_draws <- MCMCnegbin(
+  y ~ x1 + x2,
+  data = df,
+  burnin = 5000,
+  mcmc = 10000,
+  thin = 1,
+  tune = 0.5,  # Smaller tune to avoid NaN
+  b0 = beta_mu,
+  B0 = diag(1/beta_sigma^2, p),
+  a0 = alpha_r,
+  c0 = beta_r,
+  theta.start = theta_start,
+  control = list(maxit = 100),
+  verbose = 0,
+  seed = 123
+)
+end_time <- Sys.time()
+print(paste("MCMCnegbin runtime:", end_time - start_time))
+
+# MCMCnegbin Results
+cat("MCMCnegbin Estimated beta (mean):", colMeans(mcmcnegbin_draws), "\n")
+mat <- as.matrix(mcmcnegbin_draws)
+changed <- apply(diff(mat) != 0, 1, any)
+accept_rate_mcmcnegbin <- mean(changed)
+cat("MCMCnegbin Acceptance rate:", accept_rate_mcmcnegbin, "\n")
+
+# MCMCnegbin Posterior summaries
+mcmcnegbin_posterior_samples <- as.matrix(mcmcnegbin_draws)
+colnames(mcmcnegbin_posterior_samples) <- paste0("beta_", 1:p)
+summary(mcmcnegbin_posterior_samples)
+mcmcnegabin_results <- append(mcmcnegabin_results, list(mcmcnegbin_posterior_samples))
+
+# MCMCnegbin Effective sample size
+mcmc_chain_mcmcnegbin <- as.mcmc(mcmcnegbin_posterior_samples)
+ess_mcmcnegbin <- effectiveSize(mcmc_chain_mcmcnegbin)
+print("MCMCnegbin Effective Sample Size:")
+print(ess_mcmcnegbin)
+acceptance_rate_mcmcnegbin <- mean(apply(diff(mcmcnegbin_posterior_samples) != 0, 1, any))
+
+# MCMCnegbin Length of 95% CI
+ci_length_mcmcnegbin <- apply(mcmcnegbin_posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("MCMCnegbin Length of 95% CI for each parameter:")
+print(ci_length_mcmcnegbin)
+
+# Results comparison
+df_result <- data.frame(
+  method = c("HMC", "RWM", "MCMCnegbin"),
+  beta_1 = c(mean(result$samples[, 1]), mean(rwm_draws[, 1]), mean(mcmcnegbin_draws[, 1])),
+  ess_beta_1 = c(ess_hmc[1], ess_rwm[1], ess_mcmcnegbin[1]),
+  beta_2 = c(mean(result$samples[, 2]), mean(rwm_draws[, 2]), mean(mcmcnegbin_draws[, 2])),
+  ess_beta_2 = c(ess_hmc[2], ess_rwm[2], ess_mcmcnegbin[2]),
+  beta_3 = c(mean(result$samples[, 3]), mean(rwm_draws[, 3]), mean(mcmcnegbin_draws[, 3])),
+  ess_beta_3 = c(ess_hmc[3], ess_rwm[3], ess_mcmcnegbin[3]),
+  r = c(mean(r_samples), mean(rwm_r_samples), NA),  # NA for MCMCnegbin
+  ess_r = c(ess_hmc[4], ess_rwm[4], NA),           # NA for MCMCnegbin
+  acceptance_rate = c(result$acceptance_rate, accept_rate_rwm, accept_rate_mcmcnegbin)
+)
+print("Comparison of HMC, RWM, and MCMCnegbin:")
+print(df_result)
+
+# Trace and density plots
+par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
+param_names <- c(paste0("beta_", 1:p), "r")
+samples_list <- list(
+  hmc = posterior_samples,
+  rwm = rwm_posterior_samples,
+  mcmcnegbin = mcmcnegbin_posterior_samples
+)
+true_values <- c(beta_true, r_true)
+method_names <- c("HMC", "RWM", "MCMCnegbin")
+colors <- c("red", "blue", "green")
+
+for (method_idx in 1:3) {
+  samples <- samples_list[[method_idx]]
+  method <- method_names[method_idx]
+  col <- colors[method_idx]
+  max_j <- ifelse(method_idx == 3, 3, 4)  # Only beta_1, beta_2, beta_3 for MCMCnegbin
+  
+  for (j in 1:max_j) {
+    param <- param_names[j]
+    true_val <- true_values[j]
+    if (method_idx == 3 && j == 4) next  # Skip r for MCMCnegbin
+    
+    # Trace plot
+    plot(samples[, j], type = "l", 
+         main = paste(method, "Trace:", param),
+         xlab = "Iteration",
+         ylab = "Value",
+         col = col)
+    abline(h = true_val, col = "black", lwd = 2, lty = 2)
+    
+    # Density plot
+    plot(density(samples[, j]), 
+         main = paste(method, "Density:", param),
+         xlab = "Value",
+         ylab = "Density",
+         col = col, lwd = 2)
+    abline(v = true_val, col = "black", lwd = 2, lty = 2)
+  }
+}
+
+par(mfrow = c(1, 1))
+```
+### p (number of parameters) = 3, n (number of observations) = 2000
+```{r 2000, echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(123)
+
+# Set simulation parameters
+n <- 2000              # Number of observations
+p <- 3                # Number of predictors (including intercept)
+beta_true <- c(3, 5, -3)  # True regression coefficients
+r_true <- 2           # True dispersion parameter
+
+# Simulate Negative Binomial data
+data <- simulate_negbin_data(n, p, beta_true, r_true, seed = 123)
+X <- data$X
+y <- data$y
+df <- data.frame(
+  y = y,
+  x1 = X[, 2],          # drop the intercept column
+  x2 = X[, 3]
+)
+
+# Prior hyperparameters
+beta_mu <- rep(0, p)
+beta_sigma <- rep(1, p)
+alpha_r <- 5    # Stronger prior to avoid small r
+beta_r <- 2     # Prior mean = 5/2 = 2.5, variance = 5/4 = 1.25
+
+# Fit glm.nb for initial theta
+nb_model <- glm.nb(y ~ x1 + x2, data = df)
+theta_start <- nb_model$theta
+
+# Run the adaptive HMC sampler
+initial_beta <- rep(0, p)  # Initial beta coefficients
+initial_beta[3] <- -1
+initial_theta <- c(initial_beta, log(2))  # Initial beta, phi = log(2)
+start_time <- Sys.time()
+result <- hmc_sampler(
+  log_post = log_posterior_negbin_log_r,
+  grad_log_post = grad_log_posterior_negbin_log_r,
+  initial_theta = initial_theta,
+  initial_epsilon = 0.005,  # Smaller step size
+  L = 20,                   # More leapfrog steps
+  n_iter = 10000,
+  n_warmup = 5000,
+  X = X,
+  y = y,
+  beta_mu = beta_mu,
+  beta_sigma = beta_sigma,
+  alpha_r = alpha_r,
+  beta_r = beta_r,
+  target_accept = 0.8
+)
+end_time <- Sys.time()
+print(paste("HMC runtime:", end_time - start_time))
+
+# Transform phi samples back to r for reporting
+r_samples <- exp(result$samples[, p + 1])
+
+# HMC Results
+cat("True beta:", beta_true, "\n")
+cat("True r:", r_true, "\n")
+cat("Estimated beta (mean):", colMeans(result$samples[, 1:p]), "\n")
+cat("Estimated r (mean):", mean(r_samples), "\n")
+cat("HMC Acceptance rate:", result$acceptance_rate, "\n")
+cat("HMC Final epsilon:", result$final_epsilon, "\n")
+
+# HMC Posterior summaries
+posterior_samples <- cbind(result$samples[, 1:p], r_samples)
+colnames(posterior_samples) <- c(paste0("beta_", 1:p), "r")
+summary(posterior_samples)
+mcmc_hmc_results <- append(mcmc_hmc_results, list(posterior_samples))
+
+# HMC Effective sample size
+mcmc_chain_hmc <- as.mcmc(posterior_samples)
+ess_hmc <- effectiveSize(mcmc_chain_hmc)
+print("HMC Effective Sample Size:")
+print(ess_hmc)
+
+# HMC Length of 95% CI
+ci_length_hmc <- apply(posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("HMC Length of 95% CI for each parameter:")
+print(ci_length_hmc)
+
+# Run Random Walk Metropolis using MCMCmetrop1R
+log_post_wrapper <- function(theta) {
+  log_posterior_negbin_log_r(theta, X = X, y = y, 
+                             beta_mu = beta_mu, beta_sigma = beta_sigma, 
+                             alpha_r = alpha_r, beta_r = beta_r)
+}
+start_time <- Sys.time()
+rwm_draws <- MCMCmetrop1R(
+  fun = log_post_wrapper,
+  theta.init = initial_theta,  # Same initial values as HMC
+  burnin = 5000,
+  mcmc = 10000,
+  thin = 1,
+  tune = 0.1,  # Tuning for proposal SD
+  verbose = 0,
+  logfun = TRUE,
+  seed = 123
+)
+end_time <- Sys.time()
+print(paste("RWM runtime:", end_time - start_time))
+
+# Transform phi samples back to r for RWM
+rwm_r_samples <- exp(rwm_draws[, p + 1])
+
+# RWM Results
+cat("RWM Estimated beta (mean):", colMeans(rwm_draws[, 1:p]), "\n")
+cat("RWM Estimated r (mean):", mean(rwm_r_samples), "\n")
+mat <- as.matrix(rwm_draws)
+changed <- apply(diff(mat) != 0, 1, any)
+accept_rate_rwm <- mean(changed)
+cat("RWM Acceptance rate:", accept_rate_rwm, "\n")
+
+# RWM Posterior summaries
+rwm_posterior_samples <- cbind(rwm_draws[, 1:p], rwm_r_samples)
+colnames(rwm_posterior_samples) <- c(paste0("beta_", 1:p), "r")
+summary(rwm_posterior_samples)
+mcmc_rwm_results <- append(mcmc_rwm_results, list(rwm_posterior_samples))
+
+# RWM Effective sample size
+mcmc_chain_rwm <- as.mcmc(rwm_posterior_samples)
+ess_rwm <- effectiveSize(mcmc_chain_rwm)
+print("RWM Effective Sample Size:")
+print(ess_rwm)
+
+# RWM Length of 95% CI
+ci_length_rwm <- apply(rwm_posterior_samples, 2, function(x) {
+  quantile(x, 0.975) - quantile(x, 0.025)
+})
+print("RWM Length of 95% CI for each parameter:")
+print(ci_length_rwm)
+
+# Run MCMCnegbin
+print("MCMCnegbin failed, it required too many memory.")
+#start_time <- Sys.time()
+#mcmcnegbin_draws <- MCMCnegbin(
+#  y ~ x1 + x2,
+#  data = df,
+#  burnin = 5000,
+#  mcmc = 10000,
+#  thin = 1,
+#  tune = 0.5,  # Smaller tune to avoid NaN
+#  b0 = beta_mu,
+#  B0 = diag(1/beta_sigma^2, p),
+#  a0 = alpha_r,
+#  c0 = beta_r,
+#  theta.start = theta_start,
+#  control = list(maxit = 100),
+#  verbose = 0,
+#  seed = 123
+#)
+#end_time <- Sys.time()
+#print(paste("MCMCnegbin runtime:", end_time - start_time))
+
+# MCMCnegbin Results
+#cat("MCMCnegbin Estimated beta (mean):", colMeans(mcmcnegbin_draws), "\n")
+#mat <- as.matrix(mcmcnegbin_draws)
+#changed <- apply(diff(mat) != 0, 1, any)
+#accept_rate_mcmcnegbin <- mean(changed)
+#cat("MCMCnegbin Acceptance rate:", accept_rate_mcmcnegbin, "\n")
+
+# MCMCnegbin Posterior summaries
+#mcmcnegbin_posterior_samples <- as.matrix(mcmcnegbin_draws)
+#colnames(mcmcnegbin_posterior_samples) <- paste0("beta_", 1:p)
+#summary(mcmcnegbin_posterior_samples)
+mcmcnegabin_results <- append(mcmcnegabin_results, NA)
+
+# MCMCnegbin Effective sample size
+#mcmc_chain_mcmcnegbin <- as.mcmc(mcmcnegbin_posterior_samples)
+#ess_mcmcnegbin <- effectiveSize(mcmc_chain_mcmcnegbin)
+#print("MCMCnegbin Effective Sample Size:")
+#print(ess_mcmcnegbin)
+#acceptance_rate_mcmcnegbin <- mean(apply(diff(mcmcnegbin_posterior_samples) != 0, 1, any))
+
+# MCMCnegbin Length of 95% CI
+#ci_length_mcmcnegbin <- apply(mcmcnegbin_posterior_samples, 2, function(x) {
+#  quantile(x, 0.975) - quantile(x, 0.025)
+#})
+#print("MCMCnegbin Length of 95% CI for each parameter:")
+#print(ci_length_mcmcnegbin)
+
+# Results comparison
+df_result <- data.frame(
+  method = c("HMC", "RWM", "MCMCnegbin"),
+  beta_1 = c(mean(result$samples[, 1]), mean(rwm_draws[, 1]), NA),
+  ess_beta_1 = c(ess_hmc[1], ess_rwm[1], NA),
+  beta_2 = c(mean(result$samples[, 2]), mean(rwm_draws[, 2]), NA),
+  ess_beta_2 = c(ess_hmc[2], ess_rwm[2], NA),
+  beta_3 = c(mean(result$samples[, 3]), mean(rwm_draws[, 3]), NA),
+  ess_beta_3 = c(ess_hmc[3], ess_rwm[3], NA),
+  r = c(mean(r_samples), mean(rwm_r_samples), NA),  # NA for MCMCnegbin
+  ess_r = c(ess_hmc[4], ess_rwm[4], NA),           # NA for MCMCnegbin
+  acceptance_rate = c(result$acceptance_rate, accept_rate_rwm,NA)
+)
+print("Comparison of HMC, RWM, and MCMCnegbin:")
+print(df_result)
+
+# Trace and density plots
+par(mfrow = c(3, 4), mar = c(4, 4, 2, 1))
+param_names <- c(paste0("beta_", 1:p), "r")
+samples_list <- list(
+  hmc = posterior_samples,
+  rwm = rwm_posterior_samples,
+  mcmcnegbin = mcmcnegbin_posterior_samples
+)
+true_values <- c(beta_true, r_true)
+method_names <- c("HMC", "RWM", "MCMCnegbin")
+colors <- c("red", "blue", "green")
+
+for (method_idx in 1:3) {
+  samples <- samples_list[[method_idx]]
+  method <- method_names[method_idx]
+  col <- colors[method_idx]
+  max_j <- ifelse(method_idx == 3, 3, 4)  # Only beta_1, beta_2, beta_3 for MCMCnegbin
+  
+  for (j in 1:max_j) {
+    param <- param_names[j]
+    true_val <- true_values[j]
+    if (method_idx == 3 && j == 4) next  # Skip r for MCMCnegbin
+    
+    # Trace plot
+    plot(samples[, j], type = "l", 
+         main = paste(method, "Trace:", param),
+         xlab = "Iteration",
+         ylab = "Value",
+         col = col)
+    abline(h = true_val, col = "black", lwd = 2, lty = 2)
+    
+    # Density plot
+    plot(density(samples[, j]), 
+         main = paste(method, "Density:", param),
+         xlab = "Value",
+         ylab = "Density",
+         col = col, lwd = 2)
+    abline(v = true_val, col = "black", lwd = 2, lty = 2)
+  }
+}
+
+par(mfrow = c(1, 1))
+```
+## Visualization 
+```{r draw-boxplots, echo=TRUE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(reshape2)
+library(gridExtra)
+
+create_boxplots <- function(n, hmc_samples, rwm_samples, mcmcnegbin_samples, true_values) {
+  # Extract samples for the given n
+  hmc_data <- as.data.frame(hmc_samples)
+  rwm_data <- as.data.frame(rwm_samples)
+  
+  # Check if mcmcnegbin_samples is valid (not NA or NULL)
+  if (!is.null(mcmcnegbin_samples) && !identical(mcmcnegbin_samples, NA)) {
+    mcmcnegbin_data <- as.data.frame(mcmcnegbin_samples)
+  } else {
+    mcmcnegbin_data <- NULL
+  }
+  
+  # Prepare data for plotting
+  param_names <- c("beta_1", "beta_2", "beta_3", "r")
+  plots <- list()
+  
+  for (i in 1:4) {
+    param <- param_names[i]
+    
+    # Combine data for the parameter
+    if (i <= 3) {
+      # For beta parameters, all methods are available (except MCMCnegbin for n=2000)
+      hmc_param <- hmc_data[[param]]
+      rwm_param <- rwm_data[[param]]
+      if (!is.null(mcmcnegbin_data)) {
+        mcmcnegbin_param <- mcmcnegbin_data[[param]]
+        data <- data.frame(
+          Value = c(hmc_param, rwm_param, mcmcnegbin_param),
+          Method = rep(c("HMC", "RWM", "MCMCnegbin"), times = c(length(hmc_param), length(rwm_param), length(mcmcnegbin_param)))
+        )
+      } else {
+        data <- data.frame(
+          Value = c(hmc_param, rwm_param),
+          Method = rep(c("HMC", "RWM"), times = c(length(hmc_param), length(rwm_param)))
+        )
+      }
+    } else {
+      # For r, only HMC and RWM are available
+      hmc_param <- hmc_data[[param]]
+      rwm_param <- rwm_data[[param]]
+      data <- data.frame(
+        Value = c(hmc_param, rwm_param),
+        Method = rep(c("HMC", "RWM"), times = c(length(hmc_param), length(rwm_param)))
+      )
+    }
+    
+    # Create box plot
+    p <- ggplot(data, aes(x = Method, y = Value, fill = Method)) +
+      geom_boxplot() +
+      geom_hline(yintercept = true_values[i], linetype = "dashed", color = "black") +
+      theme_minimal() +
+      labs(title = paste("Parameter:", param, "(n =", n, ")"),
+           x = "Method", y = "Value") +
+      scale_fill_manual(values = c("HMC" = "red", "RWM" = "blue", "MCMCnegbin" = "green")) +
+      theme(legend.position = "none")
+    
+    plots[[i]] <- p
+  }
+  
+  # Arrange plots in a grid
+  grid.arrange(grobs = plots, ncol = 2, top = paste("Box Plots for n =", n))
+}
+
+# True values
+true_values <- c(3, 5, -3, 2)  # beta_1, beta_2, beta_3, r
+
+# Generate box plots for each sample size
+create_boxplots(200, mcmc_hmc_results[[1]], mcmc_rwm_results[[1]], mcmcnegabin_results[[1]], true_values)
+create_boxplots(500, mcmc_hmc_results[[2]], mcmc_rwm_results[[2]], mcmcnegabin_results[[2]], true_values)
+create_boxplots(1000, mcmc_hmc_results[[3]], mcmc_rwm_results[[3]], mcmcnegabin_results[[3]], true_values)
+create_boxplots(2000, mcmc_hmc_results[[4]], mcmc_rwm_results[[4]], NA, true_values)
+```
