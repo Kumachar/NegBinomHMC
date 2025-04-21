@@ -107,8 +107,7 @@ where:
 After a warm-up phase, we fix `epsilon` to the final adapted value for
 the sampling phase to ensure Markov chain validity. This means the
 algorithm may eventually have a different acceptance rate. But users can
-still use this feature to alter acceptance rate by set different accept
-rate r.
+still use this feature to alter acceptance rate by setting different target accept rate.
 
 ## Simulation Example
 
