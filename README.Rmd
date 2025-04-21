@@ -31,6 +31,8 @@ Negative Binomial regression is commonly used for modeling over-dispersed count 
 
 -   **Adaptive HMC Sampling:** Sample from the Bayesian posterior using an adaptive HMC sampler that tunes its step size during a warmup period to achieve a desired acceptance rate.
 
+-   **Overdispersion Parameter Estimation:** Jointly estimate the overdispersion parameter `r` using a Gamma prior.
+
 This package is intended for educational purposes and as a starting point for more advanced Bayesian inference in count data models.
 
 ## Package Structure
@@ -67,6 +69,7 @@ Dual averaging is a robust method to adapt `epsilon` by targeting a desired acce
 1.  Runs HMC iterations, computing the acceptance probability $\alpha_t$ at iteration $t$.
 2.  Updates a running statistic to adjust $\log \epsilon$.
 3.  Smooths the updates to stabilize convergence.
+4.  Use the final adapted `epsilon` for the sampling phase.
 
 The update rules (from Hoffman & Gelman, 2014, used in NUTS) are:
 
@@ -95,11 +98,11 @@ where:
 -   $\kappa$: Smoothing parameter (e.g., 0.75).
 -   $\epsilon_t$: Step size at iteration $t$.
 
-After a warm-up phase, we fix `epsilon` to the final adapted value for the sampling phase to ensure Markov chain validity.
+After a warm-up phase, we fix `epsilon` to the final adapted value for the sampling phase to ensure Markov chain validity. This means the algorithm may eventually have a different acceptance rate. But users can still use this feature to alter acceptance rate by set different accept rate r.
 
 ## Simulation Example
 
-Below is a basic example demonstrating how to simulate Negative Binomials data and run the adaptive HMC sampler to estimate the regression coefficients. You can play with example by altering the params. To contrast the result we used a package called `MCMCpack` to run a random walk Metropolis sampler. It provides a function called `MCMCnegbin` to fit a Negative Binomial regression model using a random walk Metropolis algorithm. Unlike our approach, it estimates the dispersion parameter `r` based on the outcome of generalized linear model (GLM). `MCMCnegbin` fails to provide valid estimates of `r` when the number of observations is less than 200 (not converge) or over 2000 (takes too many memories), while our HMC sampler can handle a larger range of observations. Here we set the number of observations to 500, which is a good trade-off between speed and accuracy. You can also try to increase the number of observations to 2000 and see the difference of these two methods.
+Below is a basic example demonstrating how to simulate Negative Binomials data and run the adaptive HMC sampler to estimate the regression coefficients. You can play with example by altering the params. To contrast the result we used a package called `MCMCpack` to run a random walk Metropolis sampler. It provides a function called `MCMCnegbin` to fit a Negative Binomial regression model using a auxiliary mixture sampling algorithm. Unlike our approach, it estimates the dispersion parameter `r` based on the outcome of generalized linear model (GLM). `MCMCnegbin` fails to provide valid estimates of `r` when the number of observations is less than 200 (not converge) or over 2000 (takes too many memories), while our HMC sampler can handle a larger range of observations. Here we set the number of observations to 500, which is a good trade-off between speed and accuracy. You can also try to increase the number of observations to 2000 and see the difference of these two methods.
 
 ```{r Simulation, warning=FALSE}
 library(NegBinomHMC)
@@ -200,7 +203,7 @@ for (j in 1:p) {
        ylab = "Density")
   abline(v = beta_true[j], col = "red", lwd = 2)
 }
-par(mfrow = c(1, 2))
+par(mfrow = c(2, 3))
 plot(r_samples, type = "l", 
      main = "Trace plot for r", ylab = "Value", xlab = "Iteration")
 abline(h = r_true, col = "red", lwd = 2)
@@ -214,7 +217,7 @@ par(mfrow = c(1, 1))
 
 ```
 
-```{r RWM simulation, warning=FALSE}
+```{r MCMCnegbin simulation, warning=FALSE}
 library(MCMCpack)
 nb_draws <- MCMCnegbin(y ~ x1 + x2,          
                        data   = df,
@@ -300,13 +303,17 @@ hmc_res <- hmc_sampler(
   beta_sigma      = 1,
   alpha_r         = 5,
   beta_r          = 2,
-  target_accept   = 0.5
+  target_accept   = 0.8
 )
 hmc_samps <- hmc_res$samples
 r_hmc     <- exp(hmc_samps[, p + 1])
 
+# Acceptance rate
+accept_rate <- hmc_res$acceptance_rate
+cat("Acceptance rate:", accept_rate, "\n")
+
 # 3) Random‑walk Metropolis
-rwm_chain <- MCMCnegbin(
+MCMCnegbin_chain <- MCMCnegbin(
   formula = daysabs ~ math + prog,
   data    = dat,
   burnin  = 0,
@@ -340,25 +347,25 @@ for(nm in rownames(conf_glm)) {
   glm_ci_upper[nm] <- conf_glm[nm, 2]
 }
 
-# RWM
-rwm_means    <- colMeans(rwm_chain)
-rwm_ci_lower <- apply(rwm_chain, 2, quantile, probs = .025)
-rwm_ci_upper <- apply(rwm_chain, 2, quantile, probs = .975)
+# MCMCnegbin
+MCMCnegbin_means    <- colMeans(MCMCnegbin_chain)
+MCMCnegbin_ci_lower <- apply(MCMCnegbin_chain, 2, quantile, probs = .025)
+MCMCnegbin_ci_upper <- apply(MCMCnegbin_chain, 2, quantile, probs = .975)
 
 # 5) Build long data.frame for β’s
 df_beta <- data.frame(
   Parameter = rep(colnames(X), 3),
-  Method    = factor(rep(c("HMC","GLM","RWM"), each = p),
-                     levels = c("HMC","GLM","RWM")),
+  Method    = factor(rep(c("HMC","GLM","MCMCnegbin"), each = p),
+                     levels = c("HMC","GLM","MCMCnegbin")),
   Estimate  = c(hmc_means[colnames(X)],
                 glm_means[colnames(X)],
-                rwm_means[colnames(X)]),
+                MCMCnegbin_means[colnames(X)]),
   CI_Lower  = c(hmc_ci_lower[colnames(X)],
                 glm_ci_lower[colnames(X)],
-                rwm_ci_lower[colnames(X)]),
+                MCMCnegbin_ci_lower[colnames(X)]),
   CI_Upper  = c(hmc_ci_upper[colnames(X)],
                 glm_ci_upper[colnames(X)],
-                rwm_ci_upper[colnames(X)])
+                MCMCnegbin_ci_upper[colnames(X)])
 )
 df_beta$Parameter <- factor(df_beta$Parameter, levels = colnames(X))
 
@@ -384,12 +391,15 @@ ggplot(df_beta, aes(x = Parameter, y = Estimate, color = Method)) +
 # 7) Plot dispersion “r”
 df_r <- data.frame(
   Parameter = factor("r"),
-  Method    = factor(c("HMC","GLM","RWM"),
-                     levels = c("HMC","GLM","RWM")),
-  Estimate  = c(hmc_means["r"], glm_means["r"], rwm_means["r"]),
-  CI_Lower  = c(hmc_ci_lower["r"], glm_ci_lower["r"], rwm_ci_lower["r"]),
-  CI_Upper  = c(hmc_ci_upper["r"], glm_ci_upper["r"], rwm_ci_upper["r"])
+  Method    = factor(c("HMC","GLM","MCMCnegbin"),
+                     levels = c("HMC","GLM","MCMCnegbin")),
+  Estimate  = c(hmc_means["r"], glm_means["r"], MCMCnegbin_means["r"]),
+  CI_Lower  = c(hmc_ci_lower["r"], glm_ci_lower["r"], MCMCnegbin_ci_lower["r"]),
+  CI_Upper  = c(hmc_ci_upper["r"], glm_ci_upper["r"], MCMCnegbin_ci_upper["r"])
 )
+
+print("df_r:")
+print(df_r)
 
 ggplot(df_r, aes(x = Parameter, y = Estimate, color = Method)) +
   geom_point(position = position_dodge(width = 0.3), size = 4) +
@@ -401,26 +411,37 @@ ggplot(df_r, aes(x = Parameter, y = Estimate, color = Method)) +
 
 
 # HMC trace & density
-par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
-for(pn in 1:3) {
-  plot(hmc_samps[,pn], type="l", main=paste("HMC Trace:", pn),
+par(mfrow = c(2, 4), mar = c(4, 4, 2, 1))
+coln <- colnames(X)
+for(pn in 1:4) {
+  plot(hmc_samps[,pn], type="l", main=paste("HMC Trace:", coln[pn]),
        xlab="Iteration", ylab="Value")
   abline(h = hmc_means[pn], col = "red", lty = 2)
 }
-for(pn in 1:3) {
+for(pn in 1:4) {
   d <- density(hmc_samps[,pn])
-  plot(d, main=paste("HMC Density:", pn),
+  plot(d, main=paste("HMC Density:", coln[pn]),
        xlab="Value", ylab="Density")
   abline(v = hmc_means[pn], col = "red", lty = 2)
 }
 par(mfrow = c(1, 1))
 
-# RWM trace
-for(pn in 1:3) {
-  plot(rwm_chain[,pn], type="l", main=paste("RWM Trace:", pn),
+# MCMCnegbin trace
+MCMCnegbin_chain <- as.data.frame(MCMCnegbin_chain)
+par(mfrow = c(2, 4), mar = c(4, 4, 2, 1))
+
+for(pn in 1:4) {
+  plot(MCMCnegbin_chain[,pn], type="l", main=paste("MCMCnegbin Trace:", coln[pn]),
        xlab="Iteration", ylab="Value")
-  abline(h = rwm_means[pn], col = "blue", lty = 2)
+  abline(h = MCMCnegbin_means[pn], col = "blue", lty = 2)
 }
+for(pn in 1:4) {
+  d <- density(MCMCnegbin_chain[,pn])
+  plot(d, main=paste("MCMCnegbin Density:", coln[pn]),
+       xlab="Value", ylab="Density")
+  abline(v = MCMCnegbin_means[pn], col = "blue", lty = 2)
+}
+par(mfrow = c(1, 1))
 
 ```
 
@@ -524,15 +545,15 @@ chain_metropolis <- MCMCnegbin(
 )
 
 cat("Random Walk Metropolis acceptance rate:", 1 - mean(rowSums(chain_metropolis[-1, ] == chain_metropolis[-nrow(chain_metropolis), ]) == ncol(chain_metropolis)), "\n")
-rwm_posterior_means <- colMeans(chain_metropolis)
-names(rwm_posterior_means) <- colnames(X)
+MCMCnegbin_posterior_means <- colMeans(chain_metropolis)
+names(MCMCnegbin_posterior_means) <- colnames(X)
 cat("Random Walk Metropolis posterior mean:\n")
-print(rwm_posterior_means)
+print(MCMCnegbin_posterior_means)
 
 ci_length <- apply(chain_metropolis, 2, function(x) {
   quantile(x, 0.975) - quantile(x, 0.025)
 })
-print("Length of 95% CI for each parameter (RWM, beta only):")
+print("Length of 95% CI for each parameter (MCMCnegbin, beta only):")
 print(ci_length)
 
 # ===== Compute HMC estimates and CI =====
@@ -540,10 +561,10 @@ hmc_mean <- posterior_means
 hmc_ci_lower <- apply(cbind(samples[, 1:ncol(X)], r_samples), 2, quantile, probs = 0.025)
 hmc_ci_upper <- apply(cbind(samples[, 1:ncol(X)], r_samples), 2, quantile, probs = 0.975)
 
-# ===== Compute RWM estimates and CI =====
-rwm_mean <- rwm_posterior_means
-rwm_ci_lower <- apply(chain_metropolis, 2, quantile, probs = 0.025)
-rwm_ci_upper <- apply(chain_metropolis, 2, quantile, probs = 0.975)
+# ===== Compute MCMCnegbin estimates and CI =====
+MCMCnegbin_mean <- MCMCnegbin_posterior_means
+MCMCnegbin_ci_lower <- apply(chain_metropolis, 2, quantile, probs = 0.025)
+MCMCnegbin_ci_upper <- apply(chain_metropolis, 2, quantile, probs = 0.975)
 
 # ===== Compute GLM estimates and CI =====
 glm_coef <- c(coef(nb_model), theta = nb_model$theta)
@@ -572,16 +593,16 @@ glm_ci["r", ] <- c(NA, NA)
 cat("Number of parameters (p + 1):", length(params), "\n")
 cat("Length of hmc_mean:", length(hmc_mean), "\n")
 cat("Length of glm_coef_aligned:", length(glm_coef_aligned), "\n")
-cat("Length of rwm_mean:", length(rwm_mean), "\n")
+cat("Length of MCMCnegbin_mean:", length(MCMCnegbin_mean), "\n")
 cat("Number of rows in glm_ci:", nrow(glm_ci), "\n")
 
 # ===== Prepare a data frame for plotting beta parameters =====
 df_beta <- data.frame(
   Parameter = rep(params[1:24], 3),
-  Method = factor(rep(c("HMC", "GLM", "RWM"), each = 24)),
-  Estimate = c(hmc_mean[1:24], glm_coef_aligned[1:24], rwm_mean),
-  CI_Lower = c(hmc_ci_lower[1:24], glm_ci[1:24, 1], rwm_ci_lower),
-  CI_Upper = c(hmc_ci_upper[1:24], glm_ci[1:24, 2], rwm_ci_upper)
+  Method = factor(rep(c("HMC", "GLM", "MCMCnegbin"), each = 24)),
+  Estimate = c(hmc_mean[1:24], glm_coef_aligned[1:24], MCMCnegbin_mean),
+  CI_Lower = c(hmc_ci_lower[1:24], glm_ci[1:24, 1], MCMCnegbin_ci_lower),
+  CI_Upper = c(hmc_ci_upper[1:24], glm_ci[1:24, 2], MCMCnegbin_ci_upper)
 )
 
 df_beta$Parameter <- factor(df_beta$Parameter, levels = params[1:24])
@@ -607,6 +628,9 @@ df_r <- data.frame(
   CI_Upper = c(hmc_ci_upper["r"], glm_ci["r", 2])
 )
 
+print("df_r:")
+print(df_r)
+
 # ===== Create the plot for r =====
 ggplot(df_r, aes(x = Parameter, y = Estimate, color = Method)) +
   geom_point(position = position_dodge(width = 0.2), size = 3) +
@@ -624,7 +648,7 @@ first_three <- params[1:3]
 colnames(samples) <- c(colnames(X), "r")
 colnames(chain_metropolis) <- colnames(X)
 
-# --- Set up the plotting area: 2 rows (first row for HMC, second row for RWM), 3 columns ---
+# --- Set up the plotting area: 2 rows (first row for HMC, second row for MCMCnegbin), 3 columns ---
 par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
 
 # --- Generate trace plots for HMC and add mean line ---
@@ -658,20 +682,38 @@ for (i in 1:3) {
          bty = "n", col = "red", lty = 2, cex = 0.8)
 }
 
-# --- Generate trace plots for RWM and add mean line ---
+# --- Generate trace plots for MCMCnegbin and add mean line ---
+par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
+chain_metropolis <- as.data.frame(chain_metropolis)
 for (i in 1:3) {
   param_name <- first_three[i]
   plot(chain_metropolis[, param_name],
        type = "l",
-       main = paste("RWM Trace:", param_name),
+       main = paste("MCMCnegbin Trace:", param_name),
        xlab = "Iteration",
        ylab = "Value")
   
-  rwm_mean_val <- mean(chain_metropolis[, param_name])
+  MCMCnegbin_mean_val <- mean(chain_metropolis[, param_name])
   
-  abline(h = rwm_mean_val, col = "blue", lwd = 2, lty = 2)
+  abline(h = MCMCnegbin_mean_val, col = "blue", lwd = 2, lty = 2)
   
-  legend("topright", legend = paste("Mean:", round(rwm_mean_val, 3)), 
+  legend("topright", legend = paste("Mean:", round(MCMCnegbin_mean_val, 3)), 
+         bty = "n", col = "blue", lty = 2, cex = 0.8)
+}
+
+# density plot
+for (i in 1:3) {
+  param_name <- first_three[i]
+  plot(density(chain_metropolis[, param_name]), 
+       main = paste("MCMCnegbin Density:", param_name),
+       xlab = "Value",
+       ylab = "Density")
+  
+  MCMCnegbin_mean_val <- mean(chain_metropolis[, param_name])
+  
+  abline(v = MCMCnegbin_mean_val, col = "blue", lwd = 2, lty = 2)
+  
+  legend("topright", legend = paste("Mean:", round(MCMCnegbin_mean_val, 3)), 
          bty = "n", col = "blue", lty = 2, cex = 0.8)
 }
 

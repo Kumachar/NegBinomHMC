@@ -21,7 +21,8 @@ hmc_sampler(
   target_accept = 0.65,
   adapt_gamma = 0.05,
   adapt_kappa = 0.75,
-  adapt_t0 = 10
+  adapt_t0 = 10,
+  seed = NULL
 )
 }
 \arguments{
@@ -58,6 +59,8 @@ hmc_sampler(
 \item{adapt_kappa}{A numeric value in (0,1) for smoothing step size updates.}
 
 \item{adapt_t0}{A positive numeric value for stabilization during adaptation.}
+
+\item{seed}{An optional integer for setting the random seed.}
 }
 \value{
 A list containing:

@@ -27,6 +27,9 @@ over-dispersed count data. With NegBinomHMC, you can:
   adaptive HMC sampler that tunes its step size during a warmup period
   to achieve a desired acceptance rate.
 
+- **Overdispersion Parameter Estimation:** Jointly estimate the
+  overdispersion parameter `r` using a Gamma prior.
+
 This package is intended for educational purposes and as a starting
 point for more advanced Bayesian inference in count data models.
 
@@ -72,6 +75,7 @@ target acceptance probabilities. The algorithm:
     at iteration $t$.
 2.  Updates a running statistic to adjust $\log \epsilon$.
 3.  Smooths the updates to stabilize convergence.
+4.  Use the final adapted `epsilon` for the sampling phase.
 
 The update rules (from Hoffman & Gelman, 2014, used in NUTS) are:
 
@@ -101,7 +105,10 @@ where:
 - $\epsilon_t$: Step size at iteration $t$.
 
 After a warm-up phase, we fix `epsilon` to the final adapted value for
-the sampling phase to ensure Markov chain validity.
+the sampling phase to ensure Markov chain validity. This means the
+algorithm may eventually have a different acceptance rate. But users can
+still use this feature to alter acceptance rate by set different accept
+rate r.
 
 ## Simulation Example
 
@@ -110,8 +117,8 @@ Binomials data and run the adaptive HMC sampler to estimate the
 regression coefficients. You can play with example by altering the
 params. To contrast the result we used a package called `MCMCpack` to
 run a random walk Metropolis sampler. It provides a function called
-`MCMCnegbin` to fit a Negative Binomial regression model using a random
-walk Metropolis algorithm. Unlike our approach, it estimates the
+`MCMCnegbin` to fit a Negative Binomial regression model using a auxiliary mixture sampling
+algorithm. Unlike our approach, it estimates the
 dispersion parameter `r` based on the outcome of generalized linear
 model (GLM). `MCMCnegbin` fails to provide valid estimates of `r` when
 the number of observations is less than 200 (not converge) or over 2000
@@ -171,7 +178,7 @@ result <- hmc_sampler(
 )
 end_time <- Sys.time()
 print(paste("HMC runtime:", end_time - start_time))
-#> [1] "HMC runtime: 20.7962441444397"
+#> [1] "HMC runtime: 20.5755100250244"
 
 # Transform phi samples back to r for reporting
 r_samples <- exp(result$samples[, p + 1])
@@ -245,7 +252,7 @@ for (j in 1:p) {
 <img src="man/figures/README-Simulation-1.png" width="100%" />
 
 ``` r
-par(mfrow = c(1, 2))
+par(mfrow = c(2, 3))
 plot(r_samples, type = "l", 
      main = "Trace plot for r", ylab = "Value", xlab = "Iteration")
 abline(h = r_true, col = "red", lwd = 2)
@@ -254,14 +261,11 @@ plot(density(r_samples),
      xlab = "Value",
      ylab = "Density")
 abline(v = r_true, col = "red", lwd = 2)
-```
-
-<img src="man/figures/README-Simulation-2.png" width="100%" />
-
-``` r
 
 par(mfrow = c(1, 1))
 ```
+
+<img src="man/figures/README-Simulation-2.png" width="100%" />
 
 ``` r
 library(MCMCpack)
@@ -332,7 +336,7 @@ for (j in 1:p) {
 }
 ```
 
-<img src="man/figures/README-RWM simulation-1.png" width="100%" />
+<img src="man/figures/README-MCMCnegbin simulation-1.png" width="100%" />
 
 ## Real-World Example 1
 
@@ -394,13 +398,18 @@ hmc_res <- hmc_sampler(
   beta_sigma      = 1,
   alpha_r         = 5,
   beta_r          = 2,
-  target_accept   = 0.5
+  target_accept   = 0.8
 )
 hmc_samps <- hmc_res$samples
 r_hmc     <- exp(hmc_samps[, p + 1])
 
+# Acceptance rate
+accept_rate <- hmc_res$acceptance_rate
+cat("Acceptance rate:", accept_rate, "\n")
+#> Acceptance rate: 0.857
+
 # 3) Random‑walk Metropolis
-rwm_chain <- MCMCnegbin(
+MCMCnegbin_chain <- MCMCnegbin(
   formula = daysabs ~ math + prog,
   data    = dat,
   burnin  = 0,
@@ -435,25 +444,25 @@ for(nm in rownames(conf_glm)) {
   glm_ci_upper[nm] <- conf_glm[nm, 2]
 }
 
-# RWM
-rwm_means    <- colMeans(rwm_chain)
-rwm_ci_lower <- apply(rwm_chain, 2, quantile, probs = .025)
-rwm_ci_upper <- apply(rwm_chain, 2, quantile, probs = .975)
+# MCMCnegbin
+MCMCnegbin_means    <- colMeans(MCMCnegbin_chain)
+MCMCnegbin_ci_lower <- apply(MCMCnegbin_chain, 2, quantile, probs = .025)
+MCMCnegbin_ci_upper <- apply(MCMCnegbin_chain, 2, quantile, probs = .975)
 
 # 5) Build long data.frame for β’s
 df_beta <- data.frame(
   Parameter = rep(colnames(X), 3),
-  Method    = factor(rep(c("HMC","GLM","RWM"), each = p),
-                     levels = c("HMC","GLM","RWM")),
+  Method    = factor(rep(c("HMC","GLM","MCMCnegbin"), each = p),
+                     levels = c("HMC","GLM","MCMCnegbin")),
   Estimate  = c(hmc_means[colnames(X)],
                 glm_means[colnames(X)],
-                rwm_means[colnames(X)]),
+                MCMCnegbin_means[colnames(X)]),
   CI_Lower  = c(hmc_ci_lower[colnames(X)],
                 glm_ci_lower[colnames(X)],
-                rwm_ci_lower[colnames(X)]),
+                MCMCnegbin_ci_lower[colnames(X)]),
   CI_Upper  = c(hmc_ci_upper[colnames(X)],
                 glm_ci_upper[colnames(X)],
-                rwm_ci_upper[colnames(X)])
+                MCMCnegbin_ci_upper[colnames(X)])
 )
 df_beta$Parameter <- factor(df_beta$Parameter, levels = colnames(X))
 
@@ -484,12 +493,20 @@ ggplot(df_beta, aes(x = Parameter, y = Estimate, color = Method)) +
 # 7) Plot dispersion “r”
 df_r <- data.frame(
   Parameter = factor("r"),
-  Method    = factor(c("HMC","GLM","RWM"),
-                     levels = c("HMC","GLM","RWM")),
-  Estimate  = c(hmc_means["r"], glm_means["r"], rwm_means["r"]),
-  CI_Lower  = c(hmc_ci_lower["r"], glm_ci_lower["r"], rwm_ci_lower["r"]),
-  CI_Upper  = c(hmc_ci_upper["r"], glm_ci_upper["r"], rwm_ci_upper["r"])
+  Method    = factor(c("HMC","GLM","MCMCnegbin"),
+                     levels = c("HMC","GLM","MCMCnegbin")),
+  Estimate  = c(hmc_means["r"], glm_means["r"], MCMCnegbin_means["r"]),
+  CI_Lower  = c(hmc_ci_lower["r"], glm_ci_lower["r"], MCMCnegbin_ci_lower["r"]),
+  CI_Upper  = c(hmc_ci_upper["r"], glm_ci_upper["r"], MCMCnegbin_ci_upper["r"])
 )
+
+print("df_r:")
+#> [1] "df_r:"
+print(df_r)
+#>   Parameter     Method Estimate  CI_Lower CI_Upper
+#> 1         r        HMC 1.042311 0.8160266 1.269705
+#> 2         r        GLM 1.032713        NA       NA
+#> 3         r MCMCnegbin       NA        NA       NA
 
 ggplot(df_r, aes(x = Parameter, y = Estimate, color = Method)) +
   geom_point(position = position_dodge(width = 0.3), size = 4) +
@@ -506,15 +523,16 @@ ggplot(df_r, aes(x = Parameter, y = Estimate, color = Method)) +
 
 
 # HMC trace & density
-par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
-for(pn in 1:3) {
-  plot(hmc_samps[,pn], type="l", main=paste("HMC Trace:", pn),
+par(mfrow = c(2, 4), mar = c(4, 4, 2, 1))
+coln <- colnames(X)
+for(pn in 1:4) {
+  plot(hmc_samps[,pn], type="l", main=paste("HMC Trace:", coln[pn]),
        xlab="Iteration", ylab="Value")
   abline(h = hmc_means[pn], col = "red", lty = 2)
 }
-for(pn in 1:3) {
+for(pn in 1:4) {
   d <- density(hmc_samps[,pn])
-  plot(d, main=paste("HMC Density:", pn),
+  plot(d, main=paste("HMC Density:", coln[pn]),
        xlab="Value", ylab="Density")
   abline(v = hmc_means[pn], col = "red", lty = 2)
 }
@@ -525,15 +543,28 @@ for(pn in 1:3) {
 ``` r
 par(mfrow = c(1, 1))
 
-# RWM trace
-for(pn in 1:3) {
-  plot(rwm_chain[,pn], type="l", main=paste("RWM Trace:", pn),
+# MCMCnegbin trace
+MCMCnegbin_chain <- as.data.frame(MCMCnegbin_chain)
+par(mfrow = c(2, 4), mar = c(4, 4, 2, 1))
+
+for(pn in 1:4) {
+  plot(MCMCnegbin_chain[,pn], type="l", main=paste("MCMCnegbin Trace:", coln[pn]),
        xlab="Iteration", ylab="Value")
-  abline(h = rwm_means[pn], col = "blue", lty = 2)
+  abline(h = MCMCnegbin_means[pn], col = "blue", lty = 2)
+}
+for(pn in 1:4) {
+  d <- density(MCMCnegbin_chain[,pn])
+  plot(d, main=paste("MCMCnegbin Density:", coln[pn]),
+       xlab="Value", ylab="Density")
+  abline(v = MCMCnegbin_means[pn], col = "blue", lty = 2)
 }
 ```
 
-<img src="man/figures/README-real-world-example-1-4.png" width="100%" /><img src="man/figures/README-real-world-example-1-5.png" width="100%" /><img src="man/figures/README-real-world-example-1-6.png" width="100%" />
+<img src="man/figures/README-real-world-example-1-4.png" width="100%" />
+
+``` r
+par(mfrow = c(1, 1))
+```
 
 ## Real-World Example 2
 
@@ -682,9 +713,9 @@ accept_rate <- hmc_result$acceptance_rate
 final_epsilon <- hmc_result$final_epsilon
 
 cat("HMC acceptance rate:", accept_rate, "\n")
-#> HMC acceptance rate: 0.77
+#> HMC acceptance rate: 0.788
 cat("final epsilon:", final_epsilon, "\n")
-#> final epsilon: 0.002311489
+#> final epsilon: 0.003321275
 
 # Transform phi samples to r
 r_samples <- exp(samples[, ncol(X) + 1])
@@ -694,55 +725,55 @@ cat("HMC posterior mean:\n")
 #> HMC posterior mean:
 print(posterior_means)
 #>                              (Intercept) 
-#>                              -2.04334284 
+#>                              -2.04650564 
 #> lighting_conditionDARKNESS, LIGHTED ROAD 
-#>                               0.10711378 
+#>                               0.10573683 
 #>                   lighting_conditionDAWN 
-#>                              -0.04332536 
+#>                              -0.04959361 
 #>               lighting_conditionDAYLIGHT 
-#>                              -0.15000531 
+#>                              -0.15158606 
 #>                   lighting_conditionDUSK 
-#>                              -0.10200016 
+#>                              -0.10397561 
 #>                lighting_conditionUNKNOWN 
-#>                              -0.92864280 
+#>                              -0.92548545 
 #>                                num_units 
-#>                               0.55147145 
+#>                               0.55183336 
 #>                       crash_day_of_week2 
-#>                              -0.12327345 
+#>                              -0.12288519 
 #>                       crash_day_of_week3 
-#>                              -0.16214471 
+#>                              -0.16139539 
 #>                       crash_day_of_week4 
-#>                              -0.13368361 
+#>                              -0.13249454 
 #>                       crash_day_of_week5 
-#>                              -0.16190569 
+#>                              -0.16163822 
 #>                       crash_day_of_week6 
-#>                              -0.19455328 
+#>                              -0.19444378 
 #>                       crash_day_of_week7 
-#>                              -0.11562203 
+#>                              -0.11493855 
 #>                             crash_month2 
-#>                              -0.07086412 
+#>                              -0.06608670 
 #>                             crash_month3 
-#>                               0.07094604 
+#>                               0.07529207 
 #>                             crash_month4 
-#>                               0.13580236 
+#>                               0.14046987 
 #>                             crash_month5 
-#>                               0.18452351 
+#>                               0.18934992 
 #>                             crash_month6 
-#>                               0.19668258 
+#>                               0.20107937 
 #>                             crash_month7 
-#>                               0.23843992 
+#>                               0.24379410 
 #>                             crash_month8 
-#>                               0.19947033 
+#>                               0.20440927 
 #>                             crash_month9 
-#>                               0.19370232 
+#>                               0.19812290 
 #>                            crash_month10 
-#>                               0.15480698 
+#>                               0.15818261 
 #>                            crash_month11 
-#>                               0.08021276 
+#>                               0.08303146 
 #>                            crash_month12 
-#>                               0.01689081 
+#>                               0.02019716 
 #>                                        r 
-#>                               0.74170725
+#>                               0.74156513
 
 cat("glm model estimated coefficients:\n")
 #> glm model estimated coefficients:
@@ -805,13 +836,13 @@ print("Length of 95% CI for each parameter:")
 #> [1] "Length of 95% CI for each parameter:"
 print(ci_length)
 #>                                                                              
-#> 0.15661409 0.10285318 0.16236817 0.10150139 0.14183421 0.20348783 0.03590899 
+#> 0.14488567 0.09596381 0.15770528 0.09432305 0.12922027 0.18589655 0.03723592 
 #>                                                                              
-#> 0.06359910 0.06788787 0.06847695 0.06963274 0.06335045 0.06041826 0.08930068 
+#> 0.06353079 0.06201048 0.06565927 0.06367069 0.06157745 0.05942602 0.09832140 
 #>                                                                              
-#> 0.08498350 0.08719351 0.08295272 0.08351210 0.08716865 0.08093465 0.08188367 
+#> 0.08991451 0.09096421 0.08745392 0.08451356 0.08225309 0.08415737 0.08574785 
 #>                                   r_samples 
-#> 0.08519391 0.08645246 0.08265197 0.03425373
+#> 0.08689967 0.08545632 0.08894162 0.03892462
 
 # Metropolis model using MCMCnegbin
 iterations <- 1000
@@ -830,11 +861,11 @@ chain_metropolis <- MCMCnegbin(
 
 cat("Random Walk Metropolis acceptance rate:", 1 - mean(rowSums(chain_metropolis[-1, ] == chain_metropolis[-nrow(chain_metropolis), ]) == ncol(chain_metropolis)), "\n")
 #> Random Walk Metropolis acceptance rate: 1
-rwm_posterior_means <- colMeans(chain_metropolis)
-names(rwm_posterior_means) <- colnames(X)
+MCMCnegbin_posterior_means <- colMeans(chain_metropolis)
+names(MCMCnegbin_posterior_means) <- colnames(X)
 cat("Random Walk Metropolis posterior mean:\n")
 #> Random Walk Metropolis posterior mean:
-print(rwm_posterior_means)
+print(MCMCnegbin_posterior_means)
 #>                              (Intercept) 
 #>                             -2.023463865 
 #> lighting_conditionDARKNESS, LIGHTED ROAD 
@@ -887,8 +918,8 @@ print(rwm_posterior_means)
 ci_length <- apply(chain_metropolis, 2, function(x) {
   quantile(x, 0.975) - quantile(x, 0.025)
 })
-print("Length of 95% CI for each parameter (RWM, beta only):")
-#> [1] "Length of 95% CI for each parameter (RWM, beta only):"
+print("Length of 95% CI for each parameter (MCMCnegbin, beta only):")
+#> [1] "Length of 95% CI for each parameter (MCMCnegbin, beta only):"
 print(ci_length)
 #>                              (Intercept) 
 #>                               0.12406558 
@@ -944,10 +975,10 @@ hmc_mean <- posterior_means
 hmc_ci_lower <- apply(cbind(samples[, 1:ncol(X)], r_samples), 2, quantile, probs = 0.025)
 hmc_ci_upper <- apply(cbind(samples[, 1:ncol(X)], r_samples), 2, quantile, probs = 0.975)
 
-# ===== Compute RWM estimates and CI =====
-rwm_mean <- rwm_posterior_means
-rwm_ci_lower <- apply(chain_metropolis, 2, quantile, probs = 0.025)
-rwm_ci_upper <- apply(chain_metropolis, 2, quantile, probs = 0.975)
+# ===== Compute MCMCnegbin estimates and CI =====
+MCMCnegbin_mean <- MCMCnegbin_posterior_means
+MCMCnegbin_ci_lower <- apply(chain_metropolis, 2, quantile, probs = 0.025)
+MCMCnegbin_ci_upper <- apply(chain_metropolis, 2, quantile, probs = 0.975)
 
 # ===== Compute GLM estimates and CI =====
 glm_coef <- c(coef(nb_model), theta = nb_model$theta)
@@ -980,18 +1011,18 @@ cat("Length of hmc_mean:", length(hmc_mean), "\n")
 #> Length of hmc_mean: 25
 cat("Length of glm_coef_aligned:", length(glm_coef_aligned), "\n")
 #> Length of glm_coef_aligned: 25
-cat("Length of rwm_mean:", length(rwm_mean), "\n")
-#> Length of rwm_mean: 24
+cat("Length of MCMCnegbin_mean:", length(MCMCnegbin_mean), "\n")
+#> Length of MCMCnegbin_mean: 24
 cat("Number of rows in glm_ci:", nrow(glm_ci), "\n")
 #> Number of rows in glm_ci: 25
 
 # ===== Prepare a data frame for plotting beta parameters =====
 df_beta <- data.frame(
   Parameter = rep(params[1:24], 3),
-  Method = factor(rep(c("HMC", "GLM", "RWM"), each = 24)),
-  Estimate = c(hmc_mean[1:24], glm_coef_aligned[1:24], rwm_mean),
-  CI_Lower = c(hmc_ci_lower[1:24], glm_ci[1:24, 1], rwm_ci_lower),
-  CI_Upper = c(hmc_ci_upper[1:24], glm_ci[1:24, 2], rwm_ci_upper)
+  Method = factor(rep(c("HMC", "GLM", "MCMCnegbin"), each = 24)),
+  Estimate = c(hmc_mean[1:24], glm_coef_aligned[1:24], MCMCnegbin_mean),
+  CI_Lower = c(hmc_ci_lower[1:24], glm_ci[1:24, 1], MCMCnegbin_ci_lower),
+  CI_Upper = c(hmc_ci_upper[1:24], glm_ci[1:24, 2], MCMCnegbin_ci_upper)
 )
 
 df_beta$Parameter <- factor(df_beta$Parameter, levels = params[1:24])
@@ -1022,6 +1053,13 @@ df_r <- data.frame(
   CI_Upper = c(hmc_ci_upper["r"], glm_ci["r", 2])
 )
 
+print("df_r:")
+#> [1] "df_r:"
+print(df_r)
+#>           Parameter Method  Estimate  CI_Lower CI_Upper
+#> r_samples         r    HMC 0.7415651 0.7220888       NA
+#>                   r    GLM 0.7415346        NA       NA
+
 # ===== Create the plot for r =====
 ggplot(df_r, aes(x = Parameter, y = Estimate, color = Method)) +
   geom_point(position = position_dodge(width = 0.2), size = 3) +
@@ -1044,7 +1082,7 @@ first_three <- params[1:3]
 colnames(samples) <- c(colnames(X), "r")
 colnames(chain_metropolis) <- colnames(X)
 
-# --- Set up the plotting area: 2 rows (first row for HMC, second row for RWM), 3 columns ---
+# --- Set up the plotting area: 2 rows (first row for HMC, second row for MCMCnegbin), 3 columns ---
 par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
 
 # --- Generate trace plots for HMC and add mean line ---
@@ -1083,20 +1121,20 @@ for (i in 1:3) {
 
 ``` r
 
-# --- Generate trace plots for RWM and add mean line ---
+# --- Generate trace plots for MCMCnegbin and add mean line ---
 for (i in 1:3) {
   param_name <- first_three[i]
   plot(chain_metropolis[, param_name],
        type = "l",
-       main = paste("RWM Trace:", param_name),
+       main = paste("MCMCnegbin Trace:", param_name),
        xlab = "Iteration",
        ylab = "Value")
   
-  rwm_mean_val <- mean(chain_metropolis[, param_name])
+  MCMCnegbin_mean_val <- mean(chain_metropolis[, param_name])
   
-  abline(h = rwm_mean_val, col = "blue", lwd = 2, lty = 2)
+  abline(h = MCMCnegbin_mean_val, col = "blue", lwd = 2, lty = 2)
   
-  legend("topright", legend = paste("Mean:", round(rwm_mean_val, 3)), 
+  legend("topright", legend = paste("Mean:", round(MCMCnegbin_mean_val, 3)), 
          bty = "n", col = "blue", lty = 2, cex = 0.8)
 }
 ```

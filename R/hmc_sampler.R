@@ -20,6 +20,7 @@
 #' @param adapt_gamma A positive numeric value controlling the adaptation rate.
 #' @param adapt_kappa A numeric value in (0,1) for smoothing step size updates.
 #' @param adapt_t0 A positive numeric value for stabilization during adaptation.
+#' @param seed An optional integer for setting the random seed.
 #'
 #' @return A list containing:
 #' \describe{
@@ -32,13 +33,17 @@
 hmc_sampler <- function(log_post, grad_log_post, initial_theta, initial_epsilon, L,
                         n_iter, n_warmup = 0, X, y, beta_mu, beta_sigma,
                         alpha_r, beta_r, target_accept = 0.65, adapt_gamma = 0.05,
-                        adapt_kappa = 0.75, adapt_t0 = 10) {
+                        adapt_kappa = 0.75, adapt_t0 = 10, seed = NULL) {
   if (initial_epsilon <= 0) stop("initial_epsilon must be positive")
   if (L < 1 || L != floor(L)) stop("L must be a positive integer")
   if (n_iter < 1 || n_iter != floor(n_iter)) stop("n_iter must be a positive integer")
   if (n_warmup < 0 || n_warmup != floor(n_warmup)) stop("n_warmup must be non-negative")
   if (length(initial_theta) != (ncol(X) + 1)) stop("initial_theta dimension mismatch")
   if (target_accept <= 0 || target_accept >= 1) stop("target_accept must be in (0,1)")
+  
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
   
   theta_current <- initial_theta
   epsilon <- initial_epsilon

@@ -3,5 +3,4 @@
 export(grad_log_posterior_negbin_log_r)
 export(hmc_sampler)
 export(log_posterior_negbin_log_r)
-export(rw_metropolis)
 export(simulate_negbin_data)
