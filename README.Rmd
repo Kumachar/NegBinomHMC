@@ -625,7 +625,7 @@ df_r <- data.frame(
   Method = factor(c("HMC", "GLM")),
   Estimate = c(hmc_mean["r"], glm_coef_aligned["r"]),
   CI_Lower = c(hmc_ci_lower["r_samples"], glm_ci["r", 1]),
-  CI_Upper = c(hmc_ci_upper["r"], glm_ci["r", 2])
+  CI_Upper = c(hmc_ci_upper["r_samples"], glm_ci["r", 2])
 )
 
 print("df_r:")

@@ -117,9 +117,9 @@ Binomials data and run the adaptive HMC sampler to estimate the
 regression coefficients. You can play with example by altering the
 params. To contrast the result we used a package called `MCMCpack` to
 run a random walk Metropolis sampler. It provides a function called
-`MCMCnegbin` to fit a Negative Binomial regression model using a auxiliary mixture sampling
-algorithm. Unlike our approach, it estimates the
-dispersion parameter `r` based on the outcome of generalized linear
+`MCMCnegbin` to fit a Negative Binomial regression model using a
+auxiliary mixture sampling algorithm. Unlike our approach, it estimates
+the dispersion parameter `r` based on the outcome of generalized linear
 model (GLM). `MCMCnegbin` fails to provide valid estimates of `r` when
 the number of observations is less than 200 (not converge) or over 2000
 (takes too many memories), while our HMC sampler can handle a larger
@@ -178,7 +178,7 @@ result <- hmc_sampler(
 )
 end_time <- Sys.time()
 print(paste("HMC runtime:", end_time - start_time))
-#> [1] "HMC runtime: 20.5755100250244"
+#> [1] "HMC runtime: 20.6978459358215"
 
 # Transform phi samples back to r for reporting
 r_samples <- exp(result$samples[, p + 1])
@@ -1050,15 +1050,15 @@ df_r <- data.frame(
   Method = factor(c("HMC", "GLM")),
   Estimate = c(hmc_mean["r"], glm_coef_aligned["r"]),
   CI_Lower = c(hmc_ci_lower["r_samples"], glm_ci["r", 1]),
-  CI_Upper = c(hmc_ci_upper["r"], glm_ci["r", 2])
+  CI_Upper = c(hmc_ci_upper["r_samples"], glm_ci["r", 2])
 )
 
 print("df_r:")
 #> [1] "df_r:"
 print(df_r)
-#>           Parameter Method  Estimate  CI_Lower CI_Upper
-#> r_samples         r    HMC 0.7415651 0.7220888       NA
-#>                   r    GLM 0.7415346        NA       NA
+#>           Parameter Method  Estimate  CI_Lower  CI_Upper
+#> r_samples         r    HMC 0.7415651 0.7220888 0.7610134
+#>                   r    GLM 0.7415346        NA        NA
 
 # ===== Create the plot for r =====
 ggplot(df_r, aes(x = Parameter, y = Estimate, color = Method)) +
@@ -1122,6 +1122,8 @@ for (i in 1:3) {
 ``` r
 
 # --- Generate trace plots for MCMCnegbin and add mean line ---
+par(mfrow = c(2, 3), mar = c(4, 4, 2, 1))
+chain_metropolis <- as.data.frame(chain_metropolis)
 for (i in 1:3) {
   param_name <- first_three[i]
   plot(chain_metropolis[, param_name],
@@ -1137,9 +1139,25 @@ for (i in 1:3) {
   legend("topright", legend = paste("Mean:", round(MCMCnegbin_mean_val, 3)), 
          bty = "n", col = "blue", lty = 2, cex = 0.8)
 }
+
+# density plot
+for (i in 1:3) {
+  param_name <- first_three[i]
+  plot(density(chain_metropolis[, param_name]), 
+       main = paste("MCMCnegbin Density:", param_name),
+       xlab = "Value",
+       ylab = "Density")
+  
+  MCMCnegbin_mean_val <- mean(chain_metropolis[, param_name])
+  
+  abline(v = MCMCnegbin_mean_val, col = "blue", lwd = 2, lty = 2)
+  
+  legend("topright", legend = paste("Mean:", round(MCMCnegbin_mean_val, 3)), 
+         bty = "n", col = "blue", lty = 2, cex = 0.8)
+}
 ```
 
-<img src="man/figures/README-real-world-example-2-4.png" width="100%" /><img src="man/figures/README-real-world-example-2-5.png" width="100%" /><img src="man/figures/README-real-world-example-2-6.png" width="100%" />
+<img src="man/figures/README-real-world-example-2-4.png" width="100%" />
 
 ``` r
 
